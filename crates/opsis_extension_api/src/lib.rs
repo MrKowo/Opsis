@@ -75,7 +75,7 @@ pub enum EventAction {
 
 /// Capability trait for extensions that provide the primary viewport renderer.
 pub trait ViewportProvider: Send + Sync {
-    fn render_viewport(&self, ctx: &ViewportContext) -> Element;
+    fn render_viewport(&self, ctx: &ViewportContext) -> Option<Element>;
 }
 
 /// Capability trait for extensions that inject HUD overlays and UI widgets.
@@ -154,8 +154,8 @@ mod tests {
 
     struct MockViewportProvider;
     impl ViewportProvider for MockViewportProvider {
-        fn render_viewport(&self, _ctx: &ViewportContext) -> Element {
-            freya::prelude::rect().into()
+        fn render_viewport(&self, _ctx: &ViewportContext) -> Option<Element> {
+            Some(freya::prelude::rect().into())
         }
     }
 

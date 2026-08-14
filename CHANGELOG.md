@@ -27,3 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Keyboard Shortcuts & Drag-and-Drop**: Added hotkey support (`O` for file open, `+`/`-` for zoom, `0` for 100%, `F` for fit, `Escape` to clear) and native file drag-and-drop loading (`on_file_drop`).
 - **Core 2D Canvas & File I/O Migration (`src/canvas.rs`, `src/file_io.rs`)**: Integrated 2D image rendering, Skia GPU viewport, cursor-centered scroll zooming, mouse-drag panning, file drag-and-drop, and native file dialogs directly into the core host binary, reserving overlay rendering and metadata HUDs for modular extensions.
 - **Settings Placeholder Cleanup**: Removed mock/placeholder configuration cards from General and Appearance tabs while preserving the 5-tab navigation rail, live Extensions inspector, real working Shortcuts list, and About pane.
+- **Automated Extension Deployment via `build.rs`**: Added a Cargo build script that automatically detects and mirrors bundles/libraries from the root `extensions/` directory into the active `target/<profile>/extensions/` output directory during `cargo build`.
+- **Optional Viewport Provider Overrides (`Option<Element>`)**: Updated `ViewportProvider::render_viewport` to return `Option<Element>`, enabling extensions to conditionally override the primary viewport or yield to the native host canvas.
+- **Reactive Extension Input Redraw Trigger**: Added a reactive state redraw trigger in `src/window.rs` upon `EventAction::Handled`, providing instant 60 FPS viewport re-rendering when extensions process hotkeys.
+

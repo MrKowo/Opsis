@@ -89,10 +89,12 @@ impl ExtensionManager {
 
     /// Render the primary viewport using the registered ViewportProvider extension.
     pub fn render_viewport(&self, ctx: &ViewportContext) -> Option<Element> {
-        self.registry
-            .viewport_providers
-            .first()
-            .map(|provider| provider.render_viewport(ctx))
+        for provider in &self.registry.viewport_providers {
+            if let Some(el) = provider.render_viewport(ctx) {
+                return Some(el);
+            }
+        }
+        None
     }
 
     /// Render all active overlay components registered by extensions.

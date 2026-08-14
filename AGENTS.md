@@ -24,6 +24,7 @@ Guidance and instructions for AI coding agents working on the **Opsis** codebase
 | [`src/manager.rs`](src/manager.rs)                           | Discovers, loads, and manages active extensions and orchestrates hook dispatching.                                                                                  |
 | [`src/bundle.rs`](src/bundle.rs)                             | `.opx` ZIP bundle extraction, platform auto-detection, and cache management.                                                                                        |
 | [`src/loader.rs`](src/loader.rs)                             | Zero-overhead native dynamic library loading via `libloading`.                                                                                                      |
+| [`build.rs`](build.rs)                                       | Build script automatically copying `extensions/` into the target output directory during `cargo build`.                                                             |
 | [`assets/logo.png`](assets/logo.png)                         | Embedded watermark asset rendered on the Base Window Canvas.                                                                                                        |
 
 ---
@@ -72,8 +73,8 @@ During `on_init`, an extension registers one or more capabilities with the [`Ext
   
   ```rust
   impl ViewportProvider for MyViewport {
-      fn render_viewport(&self, ctx: &ViewportContext) -> Element {
-          // Return Freya Element tree
+      fn render_viewport(&self, ctx: &ViewportContext) -> Option<Element> {
+          // Return optional Freya Element tree
       }
   }
   ```

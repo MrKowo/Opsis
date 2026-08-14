@@ -146,6 +146,9 @@ fn app(path: Option<PathBuf>, ext_mgr: Arc<Mutex<ExtensionManager>>) -> impl Int
         root = root.child(overlay);
     }
 
+    let mut ext_redraw_trigger = use_state(|| 0usize);
+    let _ = *ext_redraw_trigger.read();
+
     // Global Input Handling
     let ext_mgr_for_key = Arc::clone(&ext_mgr);
     let installed_exts_for_key = installed_extensions;
@@ -164,6 +167,7 @@ fn app(path: Option<PathBuf>, ext_mgr: Arc<Mutex<ExtensionManager>>) -> impl Int
                 == opsis_extension_api::EventAction::Handled
             {
                 handled = true;
+                ext_redraw_trigger.with_mut(|mut count| *count = count.wrapping_add(1));
             }
         }
 

@@ -2678,6 +2678,7 @@ dependencies = [
 name = "opsis_extension_api"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "freya",
  "serde",
  "serde_json",

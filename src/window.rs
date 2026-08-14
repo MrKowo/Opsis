@@ -132,11 +132,11 @@ fn app(path: Option<PathBuf>, ext_mgr: Arc<Mutex<ExtensionManager>>) -> impl Int
         .height(Size::fill())
         .background(Color::from_rgb(18, 18, 20));
 
-    // Core Canvas: use extension viewport if an extension provided one, otherwise use core 2D canvas
+    // Core Canvas: use extension viewport if an extension provided one, otherwise use core 2D canvas with post-processing filters
     let main_content = if let Some(viewport_element) = custom_viewport {
         viewport_element
     } else {
-        canvas_view(canvas_state, window_size)
+        canvas_view(canvas_state, window_size, Some(&ext_mgr))
     };
 
     root = root.child(main_content);
@@ -151,8 +151,6 @@ fn app(path: Option<PathBuf>, ext_mgr: Arc<Mutex<ExtensionManager>>) -> impl Int
 
     // Global Input Handling
     let ext_mgr_for_key = Arc::clone(&ext_mgr);
-    let installed_exts_for_key = installed_extensions;
-    let ext_dir_for_key = extensions_dir;
 
     root = root.on_global_key_down(move |e: Event<KeyboardEventData>| {
         let key_str = match &e.key {
@@ -209,10 +207,7 @@ fn app(path: Option<PathBuf>, ext_mgr: Arc<Mutex<ExtensionManager>>) -> impl Int
                     }
                 }
                 "s" | "S" => {
-                    crate::settings::open_settings_window(
-                        installed_exts_for_key.clone(),
-                        ext_dir_for_key.clone(),
-                    );
+                    crate::settings::open_settings_window(Arc::clone(&ext_mgr_for_key));
                 }
                 _ => {}
             }

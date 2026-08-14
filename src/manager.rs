@@ -7,31 +7,97 @@ use std::path::{Path, PathBuf};
 use crate::bundle::prepare_bundle;
 use crate::loader::{load_native_extension, LoadedExtension};
 
+/// Return the standard OS user extensions directory (XDG on Linux, AppData on Windows, Application Support on macOS).
+pub fn get_system_user_extensions_dir() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            PathBuf::from(appdata).join("Opsis").join("extensions")
+        } else if let Ok(userprofile) = std::env::var("USERPROFILE") {
+            PathBuf::from(userprofile)
+                .join("AppData")
+                .join("Roaming")
+                .join("Opsis")
+                .join("extensions")
+        } else {
+            PathBuf::from("extensions")
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(home) = std::env::var("HOME") {
+            PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+                .join("Opsis")
+                .join("extensions")
+        } else {
+            PathBuf::from("extensions")
+        }
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+            PathBuf::from(xdg).join("opsis").join("extensions")
+        } else if let Ok(home) = std::env::var("HOME") {
+            PathBuf::from(home).join(".config").join("opsis").join("extensions")
+        } else {
+            PathBuf::from("extensions")
+        }
+    }
+}
+
 /// Central Extension Manager acting as the foundation layer of Opsis.
 pub struct ExtensionManager {
+    #[allow(dead_code)]
+    pub is_portable: bool,
     pub extensions_dir: PathBuf,
     pub cache_dir: PathBuf,
     pub registry: ExtensionRegistry,
     pub loaded_extensions: Vec<LoadedExtension>,
 }
 
+impl Default for ExtensionManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ExtensionManager {
-    /// Initialize the extension manager relative to the binary executable.
+    /// Initialize the extension manager detecting portable mode vs system user profile mode.
     pub fn new() -> Self {
         let exe_dir = std::env::current_exe()
             .ok()
             .and_then(|p| p.parent().map(|p| p.to_path_buf()))
             .unwrap_or_else(|| PathBuf::from("."));
 
-        let extensions_dir = exe_dir.join("extensions");
-        let cache_dir = exe_dir.join(".extension_cache");
+        let portable_extensions = exe_dir.join("extensions");
+        let cwd_extensions = PathBuf::from("extensions");
+        let system_extensions = get_system_user_extensions_dir();
+
+        // If an extensions folder exists adjacent to the binary or in CWD, operate in Portable Mode
+        let (is_portable, primary_extensions_dir, cache_dir) = if portable_extensions.exists() {
+            (true, portable_extensions, exe_dir.join(".extension_cache"))
+        } else if cwd_extensions.exists() {
+            (true, cwd_extensions, PathBuf::from(".extension_cache"))
+        } else {
+            // System Profile Mode (e.g. standalone binary on Desktop / Downloads or installed in Program Files)
+            let system_cache = system_extensions
+                .parent()
+                .unwrap_or(&system_extensions)
+                .join("cache");
+            let _ = std::fs::create_dir_all(&system_extensions);
+            let _ = std::fs::create_dir_all(&system_cache);
+            (false, system_extensions, system_cache)
+        };
 
         // Ensure directories exist
-        let _ = std::fs::create_dir_all(&extensions_dir);
+        let _ = std::fs::create_dir_all(&primary_extensions_dir);
         let _ = std::fs::create_dir_all(&cache_dir);
 
         let mut manager = Self {
-            extensions_dir,
+            is_portable,
+            extensions_dir: primary_extensions_dir,
             cache_dir,
             registry: ExtensionRegistry::new(),
             loaded_extensions: Vec::new(),
@@ -41,12 +107,18 @@ impl ExtensionManager {
         manager
     }
 
-    /// Discover and load all extensions located in <exe_dir>/extensions/ or ./extensions/.
+    /// Discover and load all extensions across portable and system directories.
     pub fn discover_and_load_all(&mut self) {
         let mut dirs_to_scan = vec![self.extensions_dir.clone()];
+
         let cwd_extensions = PathBuf::from("extensions");
-        if cwd_extensions.exists() && cwd_extensions != self.extensions_dir {
+        if cwd_extensions.exists() && !dirs_to_scan.contains(&cwd_extensions) {
             dirs_to_scan.push(cwd_extensions);
+        }
+
+        let system_extensions = get_system_user_extensions_dir();
+        if system_extensions.exists() && !dirs_to_scan.contains(&system_extensions) {
+            dirs_to_scan.push(system_extensions);
         }
 
         for dir in dirs_to_scan {
@@ -66,16 +138,25 @@ impl ExtensionManager {
                         match load_native_extension(&bundle.binary_path, &mut self.registry) {
                             Ok(loaded) => {
                                 // Prevent duplicate loading by extension id
-                                if !self.loaded_extensions.iter().any(|e| e.manifest.id == loaded.manifest.id) {
+                                if !self
+                                    .loaded_extensions
+                                    .iter()
+                                    .any(|e| e.manifest.id == loaded.manifest.id)
+                                {
                                     println!(
                                         "[Opsis] Loaded extension: {} v{} ({})",
-                                        loaded.manifest.name, loaded.manifest.version, loaded.manifest.id
+                                        loaded.manifest.name,
+                                        loaded.manifest.version,
+                                        loaded.manifest.id
                                     );
                                     self.loaded_extensions.push(loaded);
                                 }
                             }
                             Err(err) => {
-                                eprintln!("[Opsis Extension Error] Failed to load {:?}: {}", path, err);
+                                eprintln!(
+                                    "[Opsis Extension Error] Failed to load {:?}: {}",
+                                    path, err
+                                );
                             }
                         }
                     }
@@ -106,6 +187,25 @@ impl ExtensionManager {
             .collect()
     }
 
+    /// Apply active image filters in sequence to a raw RGBA pixel buffer.
+    pub fn apply_image_filters(
+        &self,
+        rgba: &[u8],
+        width: u32,
+        height: u32,
+    ) -> Option<bytes::Bytes> {
+        let mut current_bytes: Option<bytes::Bytes> = None;
+
+        for filter in &self.registry.image_filter_providers {
+            let src = current_bytes.as_deref().unwrap_or(rgba);
+            if let Some(filtered) = filter.apply_filter(src, width, height) {
+                current_bytes = Some(filtered);
+            }
+        }
+
+        current_bytes
+    }
+
     /// Dispatch input events through registered input interceptors.
     pub fn dispatch_input(&mut self, event: &InputEvent, ctx: &InputContext) -> EventAction {
         for interceptor in &mut self.registry.input_interceptors {
@@ -122,7 +222,7 @@ impl ExtensionManager {
         self.loaded_extensions.len()
     }
 
-    /// Return the path to the extensions directory.
+    /// Return the path to the primary extensions directory.
     #[allow(dead_code)]
     pub fn extensions_dir(&self) -> &Path {
         &self.extensions_dir
@@ -145,5 +245,11 @@ mod tests {
     fn test_manager_creation_and_discovery() {
         let manager = ExtensionManager::new();
         assert!(manager.extensions_dir().exists());
+    }
+
+    #[test]
+    fn test_system_user_extensions_dir() {
+        let dir = get_system_user_extensions_dir();
+        assert!(!dir.as_os_str().is_empty());
     }
 }

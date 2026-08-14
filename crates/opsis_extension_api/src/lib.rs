@@ -2,11 +2,10 @@ use freya::prelude::Element;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// Current API version of the extension specification.
 pub const CURRENT_API_VERSION: u32 = 1;
 
-/// Metadata describing an extension.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Metadata describing an Opsis extension.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExtensionManifest {
     pub id: String,
     pub name: String,
@@ -73,26 +72,36 @@ pub enum EventAction {
     Handled,
 }
 
-/// Capability trait for extensions that provide the primary viewport renderer.
+/// Trait for extensions that provide primary canvas/viewport rendering.
 pub trait ViewportProvider: Send + Sync {
+    /// Render the primary viewport. Return `None` to let the default viewport or another provider render.
     fn render_viewport(&self, ctx: &ViewportContext) -> Option<Element>;
 }
 
-/// Capability trait for extensions that inject HUD overlays and UI widgets.
+/// Trait for extensions that inject HUD or overlay elements on top of the viewport.
 pub trait OverlayProvider: Send + Sync {
+    /// Render UI overlays layered on top of the viewport canvas.
     fn render_overlay(&self, ctx: &OverlayContext) -> Option<Element>;
 }
 
-/// Capability trait for extensions that intercept and process user input.
+/// Trait for extensions applying post-processing pixel filters to the core rendered image.
+pub trait ImageFilterProvider: Send + Sync {
+    /// Apply a filter transformation to the decoded RGBA buffer. Return `None` if inactive.
+    fn apply_filter(&self, rgba: &[u8], width: u32, height: u32) -> Option<bytes::Bytes>;
+}
+
+/// Trait for extensions that intercept keyboard and pointer input events.
 pub trait InputInterceptor: Send + Sync {
+    /// Intercept input event before default host handlers. Return `EventAction::Handled` to consume.
     fn on_input(&mut self, event: &InputEvent, ctx: &InputContext) -> EventAction;
 }
 
-/// Capability registry populated by extensions during `on_init`.
+/// Registry populated by extensions during initialization.
 #[derive(Default)]
 pub struct ExtensionRegistry {
     pub viewport_providers: Vec<Box<dyn ViewportProvider>>,
     pub overlay_providers: Vec<Box<dyn OverlayProvider>>,
+    pub image_filter_providers: Vec<Box<dyn ImageFilterProvider>>,
     pub input_interceptors: Vec<Box<dyn InputInterceptor>>,
 }
 
@@ -109,14 +118,18 @@ impl ExtensionRegistry {
         self.overlay_providers.push(provider);
     }
 
+    pub fn register_image_filter_provider(&mut self, provider: Box<dyn ImageFilterProvider>) {
+        self.image_filter_providers.push(provider);
+    }
+
     pub fn register_input_interceptor(&mut self, interceptor: Box<dyn InputInterceptor>) {
         self.input_interceptors.push(interceptor);
     }
 }
 
-/// Main trait that every Opsis extension must implement.
+/// Core extension lifecycle trait implemented by dynamic library extensions.
 pub trait OpsisExtension: Send + Sync {
-    /// Return the metadata manifest for this extension.
+    /// Returns metadata and capabilities manifest for this extension.
     fn manifest(&self) -> ExtensionManifest;
 
     /// Called on extension initialization to register capabilities.
@@ -159,12 +172,19 @@ mod tests {
         }
     }
 
+    struct MockFilterProvider;
+    impl ImageFilterProvider for MockFilterProvider {
+        fn apply_filter(&self, _rgba: &[u8], _w: u32, _h: u32) -> Option<bytes::Bytes> {
+            None
+        }
+    }
+
     #[test]
     fn test_registry_registration() {
         let mut registry = ExtensionRegistry::new();
-        assert_eq!(registry.viewport_providers.len(), 0);
         registry.register_viewport_provider(Box::new(MockViewportProvider));
+        registry.register_image_filter_provider(Box::new(MockFilterProvider));
         assert_eq!(registry.viewport_providers.len(), 1);
+        assert_eq!(registry.image_filter_providers.len(), 1);
     }
 }
-

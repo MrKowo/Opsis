@@ -126,8 +126,15 @@ impl CanvasState {
     }
 }
 
-/// Render the core 2D canvas viewport.
-pub fn canvas_view(mut state: State<CanvasState>, window_size: (f64, f64)) -> Element {
+use crate::manager::ExtensionManager;
+use std::sync::{Arc, Mutex};
+
+/// Render the core 2D canvas viewport with post-processing extension filters applied.
+pub fn canvas_view(
+    mut state: State<CanvasState>,
+    window_size: (f64, f64),
+    ext_mgr: Option<&Arc<Mutex<ExtensionManager>>>,
+) -> Element {
     let current_state = state.read().clone();
 
     if let Some(ref image_data) = current_state.image {
@@ -137,19 +144,19 @@ pub fn canvas_view(mut state: State<CanvasState>, window_size: (f64, f64)) -> El
         let rendered_h = (img_h as f32 * zoom).max(1.0);
         let (pan_x, pan_y) = current_state.pan_offset;
 
-        let bytes = Bytes::copy_from_slice(&image_data.bytes);
-        let data = unsafe { Data::new_bytes(&bytes) };
+        // Apply active post-processing filters from registered extensions
+        let filtered_bytes = if let (Some(mgr_arc), Some(ref rgba)) = (ext_mgr, &image_data.rgba_bytes) {
+            if let Ok(manager) = mgr_arc.lock() {
+                manager.apply_image_filters(rgba, img_w, img_h)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
-        let rendered_image: Element = if let Some(sk_img) = SkImage::from_encoded(data) {
-            image(ImageHandle::new(sk_img, bytes))
-                .width(Size::fill())
-                .height(Size::fill())
-                .into()
-        } else if let Ok(dyn_img) = image::load_from_memory(&image_data.bytes) {
-            let rgba = dyn_img.to_rgba8();
-            let (w, h) = rgba.dimensions();
-            let rgba_bytes = Bytes::from(rgba.into_raw());
-            if let Some(handle) = ImageHandle::from_rgba(w, h, rgba_bytes, AlphaType::Unpremul) {
+        let rendered_image: Element = if let Some(filtered) = filtered_bytes {
+            if let Some(handle) = ImageHandle::from_rgba(img_w, img_h, filtered, AlphaType::Unpremul) {
                 image(handle)
                     .width(Size::fill())
                     .height(Size::fill())
@@ -158,7 +165,28 @@ pub fn canvas_view(mut state: State<CanvasState>, window_size: (f64, f64)) -> El
                 rect().into()
             }
         } else {
-            rect().into()
+            let bytes = Bytes::copy_from_slice(&image_data.bytes);
+            let data = unsafe { Data::new_bytes(&bytes) };
+
+            if let Some(sk_img) = SkImage::from_encoded(data) {
+                image(ImageHandle::new(sk_img, bytes))
+                    .width(Size::fill())
+                    .height(Size::fill())
+                    .into()
+            } else if let Some(ref rgba) = image_data.rgba_bytes {
+                if let Some(handle) =
+                    ImageHandle::from_rgba(img_w, img_h, rgba.clone(), AlphaType::Unpremul)
+                {
+                    image(handle)
+                        .width(Size::fill())
+                        .height(Size::fill())
+                        .into()
+                } else {
+                    rect().into()
+                }
+            } else {
+                rect().into()
+            }
         };
 
         rect()
@@ -178,13 +206,14 @@ pub fn canvas_view(mut state: State<CanvasState>, window_size: (f64, f64)) -> El
                     st.drag_start = (e.global_location.x, e.global_location.y);
                 });
             })
-            .on_mouse_move(move |e: Event<MouseEventData>| {
+            .on_global_pointer_move(move |e: Event<PointerEventData>| {
                 state.with_mut(|mut st| {
                     if st.is_dragging {
-                        let dx = (e.global_location.x - st.drag_start.0) as f32;
-                        let dy = (e.global_location.y - st.drag_start.1) as f32;
+                        let loc = e.global_location();
+                        let dx = (loc.x - st.drag_start.0) as f32;
+                        let dy = (loc.y - st.drag_start.1) as f32;
                         st.pan(dx, dy);
-                        st.drag_start = (e.global_location.x, e.global_location.y);
+                        st.drag_start = (loc.x, loc.y);
                     }
                 });
             })

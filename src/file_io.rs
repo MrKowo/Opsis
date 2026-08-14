@@ -17,11 +17,12 @@ pub struct ImageMetadata {
     pub format_name: String,
 }
 
-/// An in-memory loaded image with raw file bytes and parsed metadata.
+/// An in-memory loaded image with raw file bytes, decoded RGBA buffer, and parsed metadata.
 #[derive(Debug, Clone)]
 pub struct LoadedImage {
     pub metadata: ImageMetadata,
     pub bytes: Bytes,
+    pub rgba_bytes: Option<Bytes>,
 }
 
 /// Open a native file picker dialog for selecting an image file.
@@ -56,8 +57,8 @@ pub fn load_image(path: &Path) -> Result<LoadedImage, String> {
         .unwrap_or("")
         .to_lowercase();
 
-    // Determine dimensions and format
-    let (dimensions, format_name) = match image::ImageReader::new(std::io::Cursor::new(&raw_bytes))
+    // Determine dimensions, format, and decode RGBA pixels
+    let (dimensions, format_name, rgba_bytes) = match image::ImageReader::new(std::io::Cursor::new(&raw_bytes))
         .with_guessed_format()
     {
         Ok(reader) => {
@@ -66,47 +67,41 @@ pub fn load_image(path: &Path) -> Result<LoadedImage, String> {
                 .map(|f| format!("{:?}", f).to_uppercase())
                 .unwrap_or_else(|| ext.to_uppercase());
 
-            match reader.into_dimensions() {
-                Ok(dims) => (dims, format_desc),
-                Err(_) => {
-                    if ext == "svg" {
-                        ((800, 600), "SVG".to_string())
-                    } else {
-                        match image::load_from_memory(&raw_bytes) {
-                            Ok(dyn_img) => {
-                                use image::GenericImageView;
-                                (dyn_img.dimensions(), format_desc)
-                            }
-                            Err(e) => return Err(format!("Unsupported or invalid image data: {e}")),
-                        }
-                    }
-                }
+            if let Ok(dyn_img) = reader.decode() {
+                let rgba = dyn_img.to_rgba8();
+                let dims = rgba.dimensions();
+                (dims, format_desc, Some(Bytes::from(rgba.into_raw())))
+            } else {
+                ((800, 600), format_desc, None)
             }
         }
         Err(_) => {
             if ext == "svg" {
-                ((800, 600), "SVG".to_string())
+                ((800, 600), "SVG".to_string(), None)
+            } else if let Ok(dyn_img) = image::load_from_memory(&raw_bytes) {
+                let rgba = dyn_img.to_rgba8();
+                let dims = rgba.dimensions();
+                (dims, ext.to_uppercase(), Some(Bytes::from(rgba.into_raw())))
             } else {
-                return Err(format!("Could not determine format of '{}'", path.display()));
+                return Err(format!("Unsupported or invalid image data for '{}'", path.display()));
             }
         }
     };
 
-    let metadata = ImageMetadata {
-        path: path.to_path_buf(),
-        filename,
-        dimensions,
-        file_size_bytes,
-        format_name,
-    };
-
     Ok(LoadedImage {
-        metadata,
+        metadata: ImageMetadata {
+            path: path.to_path_buf(),
+            filename,
+            dimensions,
+            file_size_bytes,
+            format_name,
+        },
         bytes: Bytes::from(raw_bytes),
+        rgba_bytes,
     })
 }
 
-/// Format file size in human-readable bytes (KB, MB, GB).
+/// Format a byte count into a human-readable string.
 #[allow(dead_code)]
 pub fn format_file_size(bytes: u64) -> String {
     const KB: u64 = 1024;
@@ -118,16 +113,16 @@ pub fn format_file_size(bytes: u64) -> String {
     } else if bytes >= MB {
         format!("{:.1} MB", bytes as f64 / MB as f64)
     } else if bytes >= KB {
-        format!("{:.0} KB", bytes as f64 / KB as f64)
+        format!("{:.1} KB", bytes as f64 / KB as f64)
     } else {
         format!("{bytes} B")
     }
 }
 
-/// Format dimensions (e.g. "1920 × 1080 px").
+/// Format image dimensions as `WIDTH x HEIGHT px`.
 #[allow(dead_code)]
-pub fn format_dimensions(dimensions: (u32, u32)) -> String {
-    format!("{} × {} px", dimensions.0, dimensions.1)
+pub fn format_dimensions(dims: (u32, u32)) -> String {
+    format!("{} x {} px", dims.0, dims.1)
 }
 
 #[cfg(test)]
@@ -137,12 +132,13 @@ mod tests {
     #[test]
     fn test_format_file_size() {
         assert_eq!(format_file_size(500), "500 B");
-        assert_eq!(format_file_size(2048), "2 KB");
-        assert_eq!(format_file_size(2_500_000), "2.4 MB");
+        assert_eq!(format_file_size(2048), "2.0 KB");
+        assert_eq!(format_file_size(1024 * 1024 * 5), "5.0 MB");
     }
 
     #[test]
     fn test_format_dimensions() {
-        assert_eq!(format_dimensions((1920, 1080)), "1920 × 1080 px");
+        assert_eq!(format_dimensions((1920, 1080)), "1920 x 1080 px");
+        assert_eq!(format_dimensions((3840, 2160)), "3840 x 2160 px");
     }
 }

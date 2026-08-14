@@ -87,6 +87,15 @@ During `on_init`, an extension registers one or more capabilities with the [`Ext
       }
   }
   ```
+- **`ImageFilterProvider`**: Applies post-processing pixel filters, color channel isolations, or compositing effects at the end of the rendering pipeline.
+  
+  ```rust
+  impl ImageFilterProvider for MyFilter {
+      fn apply_filter(&self, rgba: &[u8], width: u32, height: u32) -> Option<bytes::Bytes> {
+          // Return Some(transformed_bytes) or None if inactive
+      }
+  }
+  ```
 - **`InputInterceptor`**: Intercepts keyboard, pointer, and scroll events. Returning `EventAction::Handled` stops further propagation.
   
   ```rust
@@ -105,20 +114,17 @@ During `on_init`, an extension registers one or more capabilities with the [`Ext
 
 ### 3. Native Floating Windows
 
-Extensions can spawn standalone, detached native OS windows at runtime by calling `ctx.launch_window`:
+Extensions can spawn standalone, detached native OS windows at runtime using the fluent window builder on `ctx`:
 
 ```rust
-if let Some(ref launch) = ctx.launch_window {
-    let builder: WindowBuilderFn = Arc::new(move || {
+ctx.new_window("My Custom Tool")
+    .size(480.0, 560.0)
+    .decorations(false) // optional: explicitly override global titlebar preference
+    .resizable(true)
+    .launch(Arc::new(|trigger_redraw| {
         // Return Freya Element tree for the new window
-        my_window_view()
-    });
-    (launch)(
-        "Window Title".to_string(),
-        (480.0, 560.0), // width, height
-        builder,
-    );
-}
+        my_window_view(trigger_redraw)
+    }));
 ```
 
 ### 4. Exporting the Constructor

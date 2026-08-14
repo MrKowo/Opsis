@@ -74,70 +74,11 @@ cargo run --release
 # Open a specific image
 cargo run --release -- path/to/image.png
 ```
-
 ---
 
-## Architecture & Dependencies
+## Extensions
 
-Opsis is composed of a microkernel host and public extension API crates:
-
-| Component | Role |
-| :--- | :--- |
-| **`src/`** | Core host application (Skia canvas, native file I/O, window lifecycle, settings, and extension manager). |
-| **[`crates/opsis_extension_api`](crates/opsis_extension_api)** | Public traits and ABI contracts for building custom Opsis extensions. |
-
-### Core Dependencies
-- **`freya`** — Modern GUI library for Rust powered by Skia 2D and Winit.
-- **`image`** — Multi-format image decoding and metadata extraction.
-- **`rfd`** — Native cross-platform file picker dialogs.
-- **`libloading`** — Zero-overhead dynamic library loading for extensions.
-- **`zip`** — Extraction and discovery for universal `.opx` extension packages.
-- **`serde` / `serde_json`** — Serialization for extension manifests and configuration.
-
----
-
-## Extension Development
-
-Third-party extensions implement the [`OpsisExtension`](crates/opsis_extension_api/src/lib.rs) trait from `opsis_extension_api`:
-
-```rust
-use opsis_extension_api::{ExtensionManifest, ExtensionRegistry, OpsisExtension};
-
-pub struct MyExtension;
-
-impl OpsisExtension for MyExtension {
-    fn manifest(&self) -> ExtensionManifest {
-        ExtensionManifest {
-            id: "author.my-extension".to_string(),
-            name: "My Extension".to_string(),
-            version: "0.1.0".to_string(),
-            author: "Author Name".to_string(),
-            description: "Custom overlay or viewport extension.".to_string(),
-            api_version: 1,
-        }
-    }
-
-    fn on_init(&mut self, registry: &mut ExtensionRegistry) -> Result<(), String> {
-        // Register ViewportProvider, OverlayProvider, or InputInterceptor
-        Ok(())
-    }
-
-    fn on_unload(&mut self) {}
-}
-
-#[no_mangle]
-pub unsafe extern "Rust" fn opsis_extension_create() -> Box<dyn OpsisExtension> {
-    Box::new(MyExtension)
-}
-```
-
-Extensions can be distributed as raw dynamic libraries (`.dll`, `.so`, `.dylib`) placed in the `extensions/` directory, or packaged into universal `.opx` ZIP archives containing a `manifest.json` and platform-specific binaries.
-
----
-
-## Acknowledgments
-
-Thank you to [Oculante](https://github.com/woelper/oculante) for providing the base inspiration for this project, and the [Freya](https://github.com/marc2332/freya) team for the high-performance GUI engine.
+IF you're interested in developing extensions for Opsis, check out [Opsis-extensions](https://github.com/MrKowo/Opsis-extensions)
 
 ---
 

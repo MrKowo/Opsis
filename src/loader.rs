@@ -29,6 +29,15 @@ pub fn load_native_extension(
         let mut instance = constructor();
         let manifest = instance.manifest();
 
+        if manifest.api_version != opsis_extension_api::CURRENT_API_VERSION {
+            return Err(format!(
+                "Incompatible API version for extension '{}': expected v{}, got v{}",
+                manifest.id,
+                opsis_extension_api::CURRENT_API_VERSION,
+                manifest.api_version
+            ));
+        }
+
         instance
             .on_init(registry)
             .map_err(|e| format!("Extension '{}:{}' on_init failed: {e}", manifest.id, manifest.version))?;

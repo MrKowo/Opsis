@@ -2,6 +2,9 @@ use freya::prelude::Element;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Current API version of the extension specification.
+pub const CURRENT_API_VERSION: u32 = 1;
+
 /// Metadata describing an extension.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExtensionManifest {

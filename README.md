@@ -1,5 +1,5 @@
 <p align="center">
-  <img width="256" height="256" alt="Opsis logo" src="https://raw.githubusercontent.com/MrKowo/Opsis/main/assets/branding/logo.png" />
+  <img width="256" height="256" alt="Opsis logo" src="https://github.com/MrKowo/Opsis/blob/main/assets/logo.png?raw=true" />
 </p>
 
 # Opsis

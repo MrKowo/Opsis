@@ -5,7 +5,7 @@ use freya::prelude::*;
 
 use crate::file_io::{load_image, LoadedImage};
 
-const BASE_LOGO: &[u8] = include_bytes!("../assets/branding/logo.png");
+const BASE_LOGO: &[u8] = include_bytes!("../assets/logo.png");
 
 /// Core 2D Canvas viewport state.
 #[derive(Debug, Clone)]

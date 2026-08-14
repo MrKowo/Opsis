@@ -24,7 +24,7 @@ Guidance and instructions for AI coding agents working on the **Opsis** codebase
 | [`src/manager.rs`](src/manager.rs)                           | Discovers, loads, and manages active extensions and orchestrates hook dispatching.                                                                                  |
 | [`src/bundle.rs`](src/bundle.rs)                             | `.opx` ZIP bundle extraction, platform auto-detection, and cache management.                                                                                        |
 | [`src/loader.rs`](src/loader.rs)                             | Zero-overhead native dynamic library loading via `libloading`.                                                                                                      |
-| [`assets/branding/logo.png`](assets/branding/logo.png)       | Embedded watermark asset rendered on the Base Window Canvas.                                                                                                        |
+| [`assets/logo.png`](assets/logo.png)                         | Embedded watermark asset rendered on the Base Window Canvas.                                                                                                        |
 
 ---
 

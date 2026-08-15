@@ -11,6 +11,10 @@ members = [
     "crates/opsis_extension_api",
 ]
 
+[[bin]]
+name = "opsis_0_1_0"
+path = "src/main.rs"
+
 [dependencies]
 freya = { version = "0.4.1", default-features = false, features = ["winit", "engine"] }
 opsis_extension_api = { path = "crates/opsis_extension_api" }

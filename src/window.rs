@@ -1,8 +1,9 @@
 use crate::canvas::{canvas_view, CanvasState};
-use crate::file_io::{load_image, pick_image_file};
+use crate::file_io::{get_adjacent_image_path, load_image, pick_image_file};
+use crate::hotkeys::{CoreAction, KeyDispatchResult};
 use crate::manager::ExtensionManager;
 use freya::prelude::*;
-use opsis_extension_api::{InputContext, InputEvent, OverlayContext, ViewportContext};
+use opsis_extension_api::{InputContext, OverlayContext, ViewportContext};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -32,11 +33,36 @@ fn app(path: Option<PathBuf>, ext_mgr: Arc<Mutex<ExtensionManager>>) -> impl Int
     let current_window_size = *window_size.read();
     let mut canvas_state = use_state(CanvasState::default);
 
+    // Extension reload trigger for dynamic updates from background loader
+    let mut ext_version = use_state(|| 0usize);
+    let _ = *ext_version.read();
+
+    let (ext_tx, ext_rx) = use_hook(async_channel::unbounded::<()>);
+
+    // Start background extension loading concurrently with window/image display
+    use_hook(|| {
+        let ext_rx = ext_rx.clone();
+        spawn(async move {
+            while ext_rx.recv().await.is_ok() {
+                ext_version.with_mut(|mut v| *v = v.wrapping_add(1));
+            }
+        });
+
+        let ext_tx_clone = ext_tx.clone();
+        let trigger_update: Arc<dyn Fn() + Send + Sync + 'static> = Arc::new(move || {
+            let _ = ext_tx_clone.try_send(());
+        });
+
+        ExtensionManager::load_in_background(Arc::clone(&ext_mgr), Some(trigger_update));
+    });
+
     // Load initial image if provided via CLI args
     use_hook(|| {
         if let Some(ref initial_path) = path {
-            if let Ok(loaded) = load_image(initial_path) {
-                canvas_state.with_mut(|mut st| st.set_image(loaded, current_window_size));
+            crate::log_io!("Loading startup CLI image: '{}'", initial_path.display());
+            match load_image(initial_path) {
+                Ok(loaded) => canvas_state.with_mut(|mut st| st.set_image(loaded, current_window_size)),
+                Err(err) => canvas_state.with_mut(|mut st| st.set_error_for_path(err, initial_path.clone())),
             }
         }
     });
@@ -96,8 +122,12 @@ fn app(path: Option<PathBuf>, ext_mgr: Arc<Mutex<ExtensionManager>>) -> impl Int
                                         Key::Named(named) => format!("{named:?}"),
                                     };
                                     if key_str == "q" || key_str == "Q" || key_str == "Escape" {
-                                        let _ = Platform::get().post_callback(move |window_id, ctx| {
-                                            ctx.windows.remove(&window_id);
+                                        spawn(async move {
+                                            let _ = Platform::get()
+                                                .post_callback(move |window_id, ctx| {
+                                                    ctx.windows.remove(&window_id);
+                                                })
+                                                .await;
                                         });
                                     }
                                 })
@@ -131,6 +161,8 @@ fn app(path: Option<PathBuf>, ext_mgr: Arc<Mutex<ExtensionManager>>) -> impl Int
 
     let mut custom_viewport = None;
     let mut overlays = Vec::new();
+    let mut ext_sidebar_titles = Vec::new();
+    let mut ext_sidebar_elements = Vec::new();
 
     if let Ok(manager) = ext_mgr.lock() {
         let viewport_ctx = ViewportContext {
@@ -145,32 +177,290 @@ fn app(path: Option<PathBuf>, ext_mgr: Arc<Mutex<ExtensionManager>>) -> impl Int
 
         custom_viewport = manager.render_viewport(&viewport_ctx);
         overlays = manager.render_overlays(&overlay_ctx);
+
+        for provider in &manager.registry.sidebar_tab_providers {
+            ext_sidebar_titles.push(provider.tab_title());
+            ext_sidebar_elements.push(provider.render_tab(&overlay_ctx));
+        }
     }
 
-    let mut root = rect()
-        .width(Size::fill())
-        .height(Size::fill())
-        .background(Color::from_rgb(18, 18, 20))
-        .on_sized(move |e: Event<SizedEventData>| {
-            let (w, h) = (e.area.size.width as f64, e.area.size.height as f64);
-            if w > 0.0 && h > 0.0 && (w, h) != *window_size.read() {
-                window_size.set((w, h));
-            }
-        });
+    let mut show_sidebar = use_state(|| false);
+    let active_sidebar_tab = use_state(|| 0usize);
+    let mut zen_mode = use_state(|| false);
 
-    // Core Canvas: use extension viewport if an extension provided one, otherwise use core 2D canvas with post-processing filters
-    let main_content = if let Some(viewport_element) = custom_viewport {
+    let is_zen = *zen_mode.read();
+    let is_sidebar_visible = !is_zen && *show_sidebar.read();
+    let current_tab = *active_sidebar_tab.read();
+
+    let image_meta = canvas_state
+        .read()
+        .image
+        .as_ref()
+        .map(|img| (img.metadata.clone(), canvas_state.read().zoom));
+
+    // --- Collapsible N-Panel Sidebar ---
+    let sidebar_panel = if is_sidebar_visible {
+        let mut tab_buttons = Vec::new();
+        let base_tabs = ["Details", "Tools", "Plugins"];
+
+        for (idx, tab_name) in base_tabs.iter().enumerate() {
+            let is_active = current_tab == idx;
+            let mut active_tab_state = active_sidebar_tab;
+            tab_buttons.push(
+                rect()
+                    .padding(Gaps::new(4.0, 8.0, 4.0, 8.0))
+                    .background(if is_active {
+                        crate::ui::Theme::accent_muted()
+                    } else {
+                        Color::TRANSPARENT
+                    })
+                    .border(Border::new().width(1.0).fill(if is_active {
+                        crate::ui::Theme::accent_primary()
+                    } else {
+                        Color::TRANSPARENT
+                    }))
+                    .corner_radius(crate::ui::Theme::RADIUS_MD)
+                    .on_press(move |_| {
+                        active_tab_state.set(idx);
+                    })
+                    .child(
+                        label()
+                            .text(*tab_name)
+                            .font_size(crate::ui::Theme::FONT_CAPTION)
+                            .font_weight(if is_active {
+                                FontWeight::BOLD
+                            } else {
+                                FontWeight::NORMAL
+                            })
+                            .color(if is_active {
+                                crate::ui::Theme::accent_primary()
+                            } else {
+                                crate::ui::Theme::text_secondary()
+                            }),
+                    ),
+            );
+        }
+
+        for (offset, ext_title) in ext_sidebar_titles.iter().enumerate() {
+            let idx = base_tabs.len() + offset;
+            let is_active = current_tab == idx;
+            let mut active_tab_state = active_sidebar_tab;
+            let title_text = ext_title.clone();
+            tab_buttons.push(
+                rect()
+                    .padding(Gaps::new(4.0, 8.0, 4.0, 8.0))
+                    .background(if is_active {
+                        crate::ui::Theme::accent_muted()
+                    } else {
+                        Color::TRANSPARENT
+                    })
+                    .border(Border::new().width(1.0).fill(if is_active {
+                        crate::ui::Theme::accent_primary()
+                    } else {
+                        Color::TRANSPARENT
+                    }))
+                    .corner_radius(crate::ui::Theme::RADIUS_MD)
+                    .on_press(move |_| {
+                        active_tab_state.set(idx);
+                    })
+                    .child(
+                        label()
+                            .text(title_text)
+                            .font_size(crate::ui::Theme::FONT_CAPTION)
+                            .font_weight(if is_active {
+                                FontWeight::BOLD
+                            } else {
+                                FontWeight::NORMAL
+                            })
+                            .color(if is_active {
+                                crate::ui::Theme::accent_primary()
+                            } else {
+                                crate::ui::Theme::text_secondary()
+                            }),
+                    ),
+            );
+        }
+
+        let tabs_bar = rect()
+            .width(Size::fill())
+            .padding(Gaps::new(6.0, 8.0, 6.0, 8.0))
+            .background(crate::ui::Theme::surface_panel())
+            .border(
+                Border::new()
+                    .width(1.0)
+                    .fill(crate::ui::Theme::border_subtle()),
+            )
+            .direction(Direction::horizontal())
+            .spacing(4.0)
+            .children(tab_buttons.into_iter().map(|b| b.into()));
+
+        let panel_content = match current_tab {
+            0 => {
+                // Details Tab
+                let mut col = rect()
+                    .width(Size::fill())
+                    .direction(Direction::vertical())
+                    .child(crate::ui::section_header("Image Properties"));
+
+                if let Some((ref meta, zoom)) = image_meta {
+                    let (w, h) = meta.dimensions;
+                    let megapixels = (w as f64 * h as f64) / 1_000_000.0;
+                    col = col
+                        .child(crate::ui::info_row("Filename", &meta.filename))
+                        .child(crate::ui::info_row(
+                            "Dimensions",
+                            crate::file_io::format_dimensions((w, h)),
+                        ))
+                        .child(crate::ui::info_row(
+                            "Megapixels",
+                            format!("{megapixels:.2} MP"),
+                        ))
+                        .child(crate::ui::info_row(
+                            "Aspect Ratio",
+                            crate::file_io::format_aspect_ratio((w, h)),
+                        ))
+                        .child(crate::ui::info_row("Format", &meta.format_name))
+                        .child(crate::ui::info_row(
+                            "File Size",
+                            crate::file_io::format_file_size(meta.file_size_bytes),
+                        ))
+                        .child(crate::ui::info_row("Zoom Scale", format!("{:.0}%", zoom * 100.0)))
+                        .child(crate::ui::info_row(
+                            "Directory",
+                            meta.path
+                                .parent()
+                                .map(|p| p.display().to_string())
+                                .unwrap_or_else(|| "-".to_string()),
+                        ));
+                } else {
+                    col = col
+                        .child(crate::ui::info_row("Status", "No Image Open"))
+                        .child(crate::ui::info_row("Shortcut", "Press 'O' to open"));
+                }
+                col
+            }
+            1 => {
+                // Tools Tab
+                rect()
+                    .width(Size::fill())
+                    .direction(Direction::vertical())
+                    .child(crate::ui::section_header("Quick Actions"))
+                    .child(
+                        rect()
+                            .width(Size::fill())
+                            .padding(Gaps::new(10.0, 10.0, 10.0, 10.0))
+                            .direction(Direction::vertical())
+                            .spacing(6.0)
+                            .child(crate::ui::button_secondary("Open Image (O)", move |_| {
+                                if let Some(path) = pick_image_file() {
+                                    let win_size = *window_size.read();
+                                    match load_image(&path) {
+                                        Ok(img) => {
+                                            canvas_state.with_mut(|mut st| st.set_image(img, win_size))
+                                        }
+                                        Err(err) => {
+                                            canvas_state.with_mut(|mut st| st.set_error(err))
+                                        }
+                                    }
+                                }
+                            }))
+                            .child(crate::ui::button_secondary("Fit Axis (H)", move |_| {
+                                let has_image = canvas_state.read().image.is_some();
+                                if has_image {
+                                    let win_size = *window_size.read();
+                                    canvas_state.with_mut(|mut st| st.toggle_fit_axis(win_size));
+                                }
+                            }))
+                            .child(crate::ui::button_secondary("1:1 Pixel Scale (0)", move |_| {
+                                let has_image = canvas_state.read().image.is_some();
+                                if has_image {
+                                    canvas_state.with_mut(|mut st| st.reset_zoom());
+                                }
+                            }))
+                            .child(crate::ui::button_secondary("Clear Image (Esc)", move |_| {
+                                let has_image = canvas_state.read().image.is_some();
+                                if has_image {
+                                    canvas_state.with_mut(|mut st| st.clear_image());
+                                }
+                            })),
+                    )
+            }
+            2 => {
+                // Plugins Tab
+                let mut col = rect()
+                    .width(Size::fill())
+                    .direction(Direction::vertical())
+                    .child(crate::ui::section_header("Active Extensions"));
+
+                if installed_extensions.is_empty() {
+                    col = col.child(crate::ui::info_row("Status", "No extensions loaded"));
+                } else {
+                    for ext in &installed_extensions {
+                        col = col.child(crate::ui::info_row(
+                            &ext.name,
+                            format!("v{}", ext.version),
+                        ));
+                    }
+                }
+                col
+            }
+            _ => {
+                let ext_idx = current_tab - base_tabs.len();
+                if let Some(Some(elem)) = ext_sidebar_elements.into_iter().nth(ext_idx) {
+                    rect().width(Size::fill()).child(elem)
+                } else {
+                    rect()
+                        .width(Size::fill())
+                        .child(crate::ui::info_row("Status", "Empty tab"))
+                }
+            }
+        };
+
+        rect()
+            .width(Size::px(260.0))
+            .height(Size::fill())
+            .background(crate::ui::Theme::surface_panel())
+            .border(
+                Border::new()
+                    .width(1.0)
+                    .fill(crate::ui::Theme::border_subtle()),
+            )
+            .direction(Direction::vertical())
+            .child(tabs_bar)
+            .child(panel_content)
+    } else {
+        rect().width(Size::px(0.0)).height(Size::px(0.0))
+    };
+
+    let main_canvas = if let Some(viewport_element) = custom_viewport {
         viewport_element
     } else {
         canvas_view(canvas_state, current_window_size, Some(&ext_mgr))
     };
 
-    root = root.child(main_content);
+    let mut canvas_container = rect()
+        .width(Size::fill())
+        .height(Size::fill())
+        .child(main_canvas);
 
-    // Layer active extension overlays
     for overlay in overlays {
-        root = root.child(overlay);
+        canvas_container = canvas_container.child(overlay);
     }
+
+    let mut root = rect()
+        .width(Size::fill())
+        .height(Size::fill())
+        .background(crate::ui::Theme::surface_base())
+        .direction(Direction::horizontal())
+        .on_sized(move |e: Event<SizedEventData>| {
+            let (w, h) = (e.area.size.width as f64, e.area.size.height as f64);
+            if w > 0.0 && h > 0.0 && (w, h) != *window_size.read() {
+                crate::log_window!("Main window resized to {:.0}x{:.0} px", w, h);
+                window_size.set((w, h));
+            }
+        })
+        .child(canvas_container)
+        .child(sidebar_panel);
 
     let mut ext_redraw_trigger = use_state(|| 0usize);
     let _ = *ext_redraw_trigger.read();
@@ -184,70 +474,101 @@ fn app(path: Option<PathBuf>, ext_mgr: Arc<Mutex<ExtensionManager>>) -> impl Int
             Key::Named(named) => format!("{named:?}"),
         };
 
-        // First give active extensions a chance to intercept input
-        let mut handled = false;
-        if let Ok(mut manager) = ext_mgr_for_key.lock() {
-            if manager.dispatch_input(&InputEvent::KeyDown(key_str.clone()), &input_ctx)
-                == opsis_extension_api::EventAction::Handled
-            {
-                handled = true;
+        let dispatch_result = if let Ok(mut manager) = ext_mgr_for_key.lock() {
+            manager.dispatch_key(&key_str, &input_ctx)
+        } else {
+            KeyDispatchResult::Pass
+        };
+
+        crate::log_input!("Key down: '{key_str}' -> Dispatch: {:?}", dispatch_result);
+
+        match dispatch_result {
+            KeyDispatchResult::Handled => {
                 ext_redraw_trigger.with_mut(|mut count| *count = count.wrapping_add(1));
             }
-        }
-
-        if !handled {
-            match key_str.as_str() {
-                "o" | "O" => {
-                    if let Some(path) = pick_image_file() {
+            KeyDispatchResult::Core(CoreAction::OpenImage) => {
+                if let Some(path) = pick_image_file() {
+                    let win_size = *window_size.read();
+                    match load_image(&path) {
+                        Ok(img) => canvas_state.with_mut(|mut st| st.set_image(img, win_size)),
+                        Err(err) => canvas_state.with_mut(|mut st| st.set_error_for_path(err, path)),
+                    }
+                }
+            }
+            KeyDispatchResult::Core(CoreAction::NextImage) => {
+                let current_path = canvas_state.read().active_path();
+                if let Some(path) = current_path {
+                    if let Some(next_path) = get_adjacent_image_path(&path, true) {
                         let win_size = *window_size.read();
-                        match load_image(&path) {
-                            Ok(img) => {
-                                canvas_state.with_mut(|mut st| st.set_image(img, win_size))
-                            }
-                            Err(err) => canvas_state.with_mut(|mut st| st.set_error(err)),
+                        match load_image(&next_path) {
+                            Ok(img) => canvas_state.with_mut(|mut st| st.set_image(img, win_size)),
+                            Err(err) => canvas_state.with_mut(|mut st| st.set_error_for_path(err, next_path)),
                         }
                     }
                 }
-                "+" | "=" => {
-                    if canvas_state.read().image.is_some() {
-                        canvas_state.with_mut(|mut st| st.zoom_in());
-                    }
-                }
-                "-" | "_" => {
-                    if canvas_state.read().image.is_some() {
-                        canvas_state.with_mut(|mut st| st.zoom_out());
-                    }
-                }
-                "0" => {
-                    if canvas_state.read().image.is_some() {
-                        canvas_state.with_mut(|mut st| st.reset_zoom());
-                    }
-                }
-                "f" | "F" => {
-                    Platform::get().with_window(None, |w| {
-                        let is_max = w.is_maximized();
-                        w.set_maximized(!is_max);
-                    });
-                }
-                "h" | "H" => {
-                    if canvas_state.read().image.is_some() {
-                        let win_size = *window_size.read();
-                        canvas_state.with_mut(|mut st| st.toggle_fit_axis(win_size));
-                    }
-                }
-                "q" | "Q" => {
-                    std::process::exit(0);
-                }
-                "Escape" => {
-                    if canvas_state.read().image.is_some() {
-                        canvas_state.with_mut(|mut st| st.clear_image());
-                    }
-                }
-                "s" | "S" => {
-                    crate::settings::open_settings_window(Arc::clone(&ext_mgr_for_key));
-                }
-                _ => {}
             }
+            KeyDispatchResult::Core(CoreAction::PrevImage) => {
+                let current_path = canvas_state.read().active_path();
+                if let Some(path) = current_path {
+                    if let Some(prev_path) = get_adjacent_image_path(&path, false) {
+                        let win_size = *window_size.read();
+                        match load_image(&prev_path) {
+                            Ok(img) => canvas_state.with_mut(|mut st| st.set_image(img, win_size)),
+                            Err(err) => canvas_state.with_mut(|mut st| st.set_error_for_path(err, prev_path)),
+                        }
+                    }
+                }
+            }
+            KeyDispatchResult::Core(CoreAction::ZoomIn) => {
+                let has_image = canvas_state.read().image.is_some();
+                if has_image {
+                    canvas_state.with_mut(|mut st| st.zoom_in());
+                }
+            }
+            KeyDispatchResult::Core(CoreAction::ZoomOut) => {
+                let has_image = canvas_state.read().image.is_some();
+                if has_image {
+                    canvas_state.with_mut(|mut st| st.zoom_out());
+                }
+            }
+            KeyDispatchResult::Core(CoreAction::ResetZoom) => {
+                let has_image = canvas_state.read().image.is_some();
+                if has_image {
+                    canvas_state.with_mut(|mut st| st.reset_zoom());
+                }
+            }
+            KeyDispatchResult::Core(CoreAction::ToggleFitAxis) => {
+                let has_image = canvas_state.read().image.is_some();
+                if has_image {
+                    let win_size = *window_size.read();
+                    canvas_state.with_mut(|mut st| st.toggle_fit_axis(win_size));
+                }
+            }
+            KeyDispatchResult::Core(CoreAction::ToggleMaximize) => {
+                Platform::get().with_window(None, |w| {
+                    let is_max = w.is_maximized();
+                    w.set_maximized(!is_max);
+                });
+            }
+            KeyDispatchResult::Core(CoreAction::ToggleSidebar) => {
+                show_sidebar.toggle();
+            }
+            KeyDispatchResult::Core(CoreAction::ToggleZenMode) => {
+                zen_mode.toggle();
+            }
+            KeyDispatchResult::Core(CoreAction::ClearImage) => {
+                let has_image_or_err = canvas_state.read().image.is_some() || canvas_state.read().error_message.is_some();
+                if has_image_or_err {
+                    canvas_state.with_mut(|mut st| st.clear_image());
+                }
+            }
+            KeyDispatchResult::Core(CoreAction::OpenSettings) => {
+                crate::settings::open_settings_window(Arc::clone(&ext_mgr_for_key));
+            }
+            KeyDispatchResult::Core(CoreAction::CloseWindow) => {
+                std::process::exit(0);
+            }
+            KeyDispatchResult::Pass => {}
         }
     });
 

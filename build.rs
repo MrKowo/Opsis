@@ -51,11 +51,11 @@ fn main() {
         let mut res = winres::WindowsResource::new();
         res.set_icon("assets/icon.ico");
         res.set("FileDescription", "Opsis Image Viewer");
-        res.set("ProductName", &format!("Opsis v{}", version));
+        res.set("ProductName", "Opsis");
         res.set("ProductVersion", &version);
         res.set("FileVersion", &version);
-        res.set("OriginalFilename", &format!("opsis-v{}.exe", version));
-        res.set("InternalName", &format!("opsis-v{}", version));
+        res.set("OriginalFilename", "opsis.exe");
+        res.set("InternalName", "opsis");
         res.set("LegalCopyright", "Copyright (c) 2026 Opsis Contributors");
         if let Err(err) = res.compile() {
             eprintln!("[build.rs] Warning: Could not compile Windows icon resource: {}", err);

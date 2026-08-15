@@ -47,14 +47,21 @@ pub fn get_system_user_extensions_dir() -> PathBuf {
     }
 }
 
+use crate::hotkeys::{HotkeyRegistry, KeyDispatchResult};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
 /// Central Extension Manager acting as the foundation layer of Opsis.
 pub struct ExtensionManager {
     #[allow(dead_code)]
     pub is_portable: bool,
     pub extensions_dir: PathBuf,
     pub cache_dir: PathBuf,
+    pub config_dir: PathBuf,
     pub registry: ExtensionRegistry,
     pub loaded_extensions: Vec<LoadedExtension>,
+    pub hotkey_registry: HotkeyRegistry,
+    pub is_loading: Arc<AtomicBool>,
 }
 
 impl Default for ExtensionManager {
@@ -63,8 +70,20 @@ impl Default for ExtensionManager {
     }
 }
 
+/// Load and initialize a candidate extension file (.opx or dynamic library).
+fn load_candidate_extension(
+    path: &Path,
+    cache_dir: &Path,
+) -> Result<(LoadedExtension, ExtensionRegistry), String> {
+    let bundle = prepare_bundle(path, cache_dir)?;
+    let mut temp_registry = ExtensionRegistry::new();
+    let loaded = load_native_extension(&bundle.binary_path, &mut temp_registry)?;
+    Ok((loaded, temp_registry))
+}
+
 impl ExtensionManager {
     /// Initialize the extension manager detecting portable mode vs system user profile mode.
+    /// Returns immediately without blocking on extension discovery or dynamic loading.
     pub fn new() -> Self {
         let exe_dir = std::env::current_exe()
             .ok()
@@ -76,39 +95,54 @@ impl ExtensionManager {
         let system_extensions = get_system_user_extensions_dir();
 
         // If an extensions folder exists adjacent to the binary or in CWD, operate in Portable Mode
-        let (is_portable, primary_extensions_dir, cache_dir) = if portable_extensions.exists() {
-            (true, portable_extensions, exe_dir.join(".extension_cache"))
+        let (is_portable, primary_extensions_dir, cache_dir, config_dir) = if portable_extensions.exists() {
+            (
+                true,
+                portable_extensions,
+                exe_dir.join(".extension_cache"),
+                exe_dir.clone(),
+            )
         } else if cwd_extensions.exists() {
-            (true, cwd_extensions, PathBuf::from(".extension_cache"))
+            (
+                true,
+                cwd_extensions,
+                PathBuf::from(".extension_cache"),
+                PathBuf::from("."),
+            )
         } else {
             // System Profile Mode (e.g. standalone binary on Desktop / Downloads or installed in Program Files)
-            let system_cache = system_extensions
+            let system_base = system_extensions
                 .parent()
                 .unwrap_or(&system_extensions)
-                .join("cache");
+                .to_path_buf();
+            let system_cache = system_base.join("cache");
             let _ = std::fs::create_dir_all(&system_extensions);
             let _ = std::fs::create_dir_all(&system_cache);
-            (false, system_extensions, system_cache)
+            (false, system_extensions, system_cache, system_base)
         };
 
         // Ensure directories exist
         let _ = std::fs::create_dir_all(&primary_extensions_dir);
         let _ = std::fs::create_dir_all(&cache_dir);
+        let _ = std::fs::create_dir_all(&config_dir);
 
-        let mut manager = Self {
+        let mut hotkey_registry = HotkeyRegistry::new();
+        hotkey_registry.load_keybindings(&config_dir);
+
+        Self {
             is_portable,
             extensions_dir: primary_extensions_dir,
             cache_dir,
+            config_dir,
             registry: ExtensionRegistry::new(),
             loaded_extensions: Vec::new(),
-        };
-
-        manager.discover_and_load_all();
-        manager
+            hotkey_registry,
+            is_loading: Arc::new(AtomicBool::new(false)),
+        }
     }
 
-    /// Discover and load all extensions across portable and system directories.
-    pub fn discover_and_load_all(&mut self) {
+    /// Return list of extension directories to scan based on portable vs user mode.
+    pub fn candidate_extension_dirs(&self) -> Vec<PathBuf> {
         let mut dirs_to_scan = Vec::new();
         let mut seen_dirs = std::collections::HashSet::new();
 
@@ -130,51 +164,128 @@ impl ExtensionManager {
             }
         }
 
-        for dir in dirs_to_scan {
-            if !dir.exists() {
-                continue;
-            }
+        dirs_to_scan
+    }
 
-            let entries = match std::fs::read_dir(&dir) {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
-
-            for entry in entries.flatten() {
-                let path = entry.path();
-                match prepare_bundle(&path, &self.cache_dir) {
-                    Ok(bundle) => {
-                        match load_native_extension(&bundle.binary_path, &mut self.registry) {
-                            Ok(loaded) => {
-                                // Prevent duplicate loading by extension id
-                                if !self
-                                    .loaded_extensions
-                                    .iter()
-                                    .any(|e| e.manifest.id == loaded.manifest.id)
-                                {
-                                    println!(
-                                        "[Opsis] Loaded extension: {} v{} ({})",
-                                        loaded.manifest.name,
-                                        loaded.manifest.version,
-                                        loaded.manifest.id
-                                    );
-                                    self.loaded_extensions.push(loaded);
-                                }
-                            }
-                            Err(err) => {
-                                eprintln!(
-                                    "[Opsis Extension Error] Failed to load {:?}: {}",
-                                    path, err
-                                );
+    /// Scan directories and collect candidate extension files (.opx, .dll, .so, .dylib).
+    pub fn find_candidate_extension_files(&self) -> Vec<PathBuf> {
+        let mut files = Vec::new();
+        for dir in self.candidate_extension_dirs() {
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() {
+                        if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+                            let ext_lower = ext.to_lowercase();
+                            if matches!(ext_lower.as_str(), "opx" | "dll" | "so" | "dylib") {
+                                files.push(path);
                             }
                         }
-                    }
-                    Err(err) => {
-                        eprintln!("[Opsis Extension Warning] Skipping {:?}: {}", path, err);
                     }
                 }
             }
         }
+        crate::log_ext!("Found {} candidate extension file(s) across scan paths", files.len());
+        files
+    }
+
+    /// Discover and load all extensions across portable and system directories synchronously.
+    pub fn discover_and_load_all(&mut self) {
+        let candidate_files = self.find_candidate_extension_files();
+        for path in candidate_files {
+            match load_candidate_extension(&path, &self.cache_dir) {
+                Ok((loaded, temp_registry)) => {
+                    // Prevent duplicate loading by extension id
+                    if !self
+                        .loaded_extensions
+                        .iter()
+                        .any(|e| e.manifest.id == loaded.manifest.id)
+                    {
+                        crate::log_ext!(
+                            "Loaded extension: {} v{} ({}) from '{}'",
+                            loaded.manifest.name,
+                            loaded.manifest.version,
+                            loaded.manifest.id,
+                            path.display()
+                        );
+                        self.loaded_extensions.push(loaded);
+                        self.registry.append(temp_registry);
+                        self.hotkey_registry.sync_extension_actions(&mut self.registry);
+                    }
+                }
+                Err(err) => {
+                    crate::log_ext!("Warning: Failed to load '{:?}': {}", path, err);
+                }
+            }
+        }
+    }
+
+    /// Load extensions concurrently in a dedicated background thread in parallel with window and image display.
+    pub fn load_in_background(
+        ext_mgr: Arc<std::sync::Mutex<ExtensionManager>>,
+        on_update: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
+    ) -> std::thread::JoinHandle<()> {
+        std::thread::Builder::new()
+            .name("opsis-extension-loader".to_string())
+            .spawn(move || {
+                let (candidate_files, cache_dir) = {
+                    if let Ok(mgr) = ext_mgr.lock() {
+                        mgr.is_loading.store(true, Ordering::SeqCst);
+                        crate::log_ext!("Starting background extension discovery & loading...");
+                        (mgr.find_candidate_extension_files(), mgr.cache_dir.clone())
+                    } else {
+                        return;
+                    }
+                };
+
+                for path in candidate_files {
+                    match load_candidate_extension(&path, &cache_dir) {
+                        Ok((loaded, temp_registry)) => {
+                            if let Ok(mut mgr) = ext_mgr.lock() {
+                                if !mgr
+                                    .loaded_extensions
+                                    .iter()
+                                    .any(|e| e.manifest.id == loaded.manifest.id)
+                                {
+                                    crate::log_ext!(
+                                        "Loaded background extension: {} v{} ({}) from '{}'",
+                                        loaded.manifest.name,
+                                        loaded.manifest.version,
+                                        loaded.manifest.id,
+                                        path.display()
+                                    );
+                                    mgr.loaded_extensions.push(loaded);
+                                    mgr.registry.append(temp_registry);
+                                    let mut temp_reg = ExtensionRegistry::new();
+                                    std::mem::swap(&mut mgr.registry.registered_actions, &mut temp_reg.registered_actions);
+                                    mgr.hotkey_registry.sync_extension_actions(&mut temp_reg);
+                                }
+                            }
+                            if let Some(ref cb) = on_update {
+                                cb();
+                            }
+                        }
+                        Err(err) => {
+                            crate::log_ext!("Warning: Failed to load '{:?}': {}", path, err);
+                        }
+                    }
+                }
+
+                if let Ok(mgr) = ext_mgr.lock() {
+                    mgr.is_loading.store(false, Ordering::SeqCst);
+                    crate::log_ext!("Background extension loading complete ({} active)", mgr.loaded_extensions.len());
+                }
+
+                if let Some(ref cb) = on_update {
+                    cb();
+                }
+            })
+            .expect("Failed to spawn extension loader thread")
+    }
+
+    /// Check if background extension loading is currently active.
+    pub fn is_loading(&self) -> bool {
+        self.is_loading.load(Ordering::SeqCst)
     }
 
     /// Render the primary viewport using the registered ViewportProvider extension.
@@ -225,6 +336,32 @@ impl ExtensionManager {
         EventAction::Pass
     }
 
+    /// Dispatch a key event using the centralized HotkeyRegistry (prioritizing extension actions, then core actions).
+    pub fn dispatch_key(&mut self, key_str: &str, ctx: &InputContext) -> KeyDispatchResult {
+        // Raw input interceptors (legacy/direct input interception)
+        if self.dispatch_input(&InputEvent::KeyDown(key_str.to_string()), ctx) == EventAction::Handled {
+            return KeyDispatchResult::Handled;
+        }
+
+        // Centralized hotkey & action registry
+        self.hotkey_registry.dispatch_key(key_str, ctx)
+    }
+
+    /// Rebind an action to a new key and persist to disk.
+    pub fn rebind_hotkey(&mut self, action_id: &str, new_key: String) {
+        self.hotkey_registry.rebind_action(action_id, new_key, &self.config_dir);
+    }
+
+    /// Reset an action to its default keybindings.
+    pub fn reset_hotkey(&mut self, action_id: &str) {
+        self.hotkey_registry.reset_action(action_id, &self.config_dir);
+    }
+
+    /// Reset all actions to default keybindings.
+    pub fn reset_all_hotkeys(&mut self) {
+        self.hotkey_registry.reset_all(&self.config_dir);
+    }
+
     /// Return the count of actively loaded extensions.
     #[allow(dead_code)]
     pub fn extension_count(&self) -> usize {
@@ -252,13 +389,34 @@ mod tests {
 
     #[test]
     fn test_manager_creation_and_discovery() {
-        let manager = ExtensionManager::new();
+        let mut manager = ExtensionManager::new();
         assert!(manager.extensions_dir().exists());
+        assert!(!manager.is_loading());
+        manager.discover_and_load_all();
     }
 
     #[test]
     fn test_system_user_extensions_dir() {
         let dir = get_system_user_extensions_dir();
         assert!(!dir.as_os_str().is_empty());
+    }
+
+    #[test]
+    fn test_candidate_dirs_and_background_loading() {
+        let manager = Arc::new(std::sync::Mutex::new(ExtensionManager::new()));
+        let update_called = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let update_clone = Arc::clone(&update_called);
+
+        let handle = ExtensionManager::load_in_background(
+            Arc::clone(&manager),
+            Some(Arc::new(move || {
+                update_clone.store(true, Ordering::SeqCst);
+            })),
+        );
+
+        handle.join().expect("Loader thread join");
+        let mgr = manager.lock().unwrap();
+        assert!(!mgr.is_loading());
+        assert!(update_called.load(Ordering::SeqCst));
     }
 }

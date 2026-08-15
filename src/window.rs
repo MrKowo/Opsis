@@ -6,6 +6,8 @@ use opsis_extension_api::{InputContext, InputEvent, OverlayContext, ViewportCont
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+const APP_ICON: &[u8] = include_bytes!("../assets/icon.png");
+
 /// Launch the Opsis window host and Freya UI runtime.
 pub fn run(path: Option<PathBuf>, extension_manager: Arc<Mutex<ExtensionManager>>) {
     launch(
@@ -16,6 +18,7 @@ pub fn run(path: Option<PathBuf>, extension_manager: Arc<Mutex<ExtensionManager>
                 app(path, ext_mgr)
             })
             .with_title("Opsis")
+            .with_icon(LaunchConfig::window_icon(APP_ICON))
             .with_background(Color::from_rgb(18, 18, 20))
             .with_on_close(|_ctx, _window_id| {
                 std::process::exit(0);
@@ -25,14 +28,15 @@ pub fn run(path: Option<PathBuf>, extension_manager: Arc<Mutex<ExtensionManager>
 }
 
 fn app(path: Option<PathBuf>, ext_mgr: Arc<Mutex<ExtensionManager>>) -> impl IntoElement {
-    let window_size = (800.0, 600.0);
+    let mut window_size = use_state(|| (800.0, 600.0));
+    let current_window_size = *window_size.read();
     let mut canvas_state = use_state(CanvasState::default);
 
     // Load initial image if provided via CLI args
     use_hook(|| {
         if let Some(ref initial_path) = path {
             if let Ok(loaded) = load_image(initial_path) {
-                canvas_state.with_mut(|mut st| st.set_image(loaded, window_size));
+                canvas_state.with_mut(|mut st| st.set_image(loaded, current_window_size));
             }
         }
     });
@@ -82,9 +86,25 @@ fn app(path: Option<PathBuf>, ext_mgr: Arc<Mutex<ExtensionManager>>) -> impl Int
                                 Arc::new(move || {
                                     let _ = tx_clone.try_send(());
                                 });
-                            (builder)(trigger_redraw)
+                            let view = (builder)(trigger_redraw);
+                            rect()
+                                .width(Size::fill())
+                                .height(Size::fill())
+                                .on_global_key_down(move |e: Event<KeyboardEventData>| {
+                                    let key_str = match &e.key {
+                                        Key::Character(c) => c.clone(),
+                                        Key::Named(named) => format!("{named:?}"),
+                                    };
+                                    if key_str == "q" || key_str == "Q" || key_str == "Escape" {
+                                        let _ = Platform::get().post_callback(move |window_id, ctx| {
+                                            ctx.windows.remove(&window_id);
+                                        });
+                                    }
+                                })
+                                .child(view)
                         })
                         .with_title(title_static)
+                        .with_icon(LaunchConfig::window_icon(APP_ICON))
                         .with_size(size.0, size.1)
                         .with_background(Color::from_rgb(18, 18, 20)),
                     )
@@ -95,7 +115,7 @@ fn app(path: Option<PathBuf>, ext_mgr: Arc<Mutex<ExtensionManager>>) -> impl Int
 
     let overlay_ctx = OverlayContext {
         image_path: current_image_path.clone(),
-        window_size,
+        window_size: current_window_size,
         extensions_dir: extensions_dir.clone(),
         installed_extensions: installed_extensions.clone(),
         launch_window: Some(Arc::clone(&launch_window)),
@@ -103,7 +123,7 @@ fn app(path: Option<PathBuf>, ext_mgr: Arc<Mutex<ExtensionManager>>) -> impl Int
 
     let input_ctx = InputContext {
         image_path: current_image_path,
-        window_size,
+        window_size: current_window_size,
         extensions_dir: extensions_dir.clone(),
         installed_extensions: installed_extensions.clone(),
         launch_window: Some(launch_window),
@@ -120,7 +140,7 @@ fn app(path: Option<PathBuf>, ext_mgr: Arc<Mutex<ExtensionManager>>) -> impl Int
                 .as_ref()
                 .map(|img| img.metadata.path.clone()),
             image_bytes: None,
-            window_size,
+            window_size: current_window_size,
         };
 
         custom_viewport = manager.render_viewport(&viewport_ctx);
@@ -130,13 +150,19 @@ fn app(path: Option<PathBuf>, ext_mgr: Arc<Mutex<ExtensionManager>>) -> impl Int
     let mut root = rect()
         .width(Size::fill())
         .height(Size::fill())
-        .background(Color::from_rgb(18, 18, 20));
+        .background(Color::from_rgb(18, 18, 20))
+        .on_sized(move |e: Event<SizedEventData>| {
+            let (w, h) = (e.area.size.width as f64, e.area.size.height as f64);
+            if w > 0.0 && h > 0.0 && (w, h) != *window_size.read() {
+                window_size.set((w, h));
+            }
+        });
 
     // Core Canvas: use extension viewport if an extension provided one, otherwise use core 2D canvas with post-processing filters
     let main_content = if let Some(viewport_element) = custom_viewport {
         viewport_element
     } else {
-        canvas_view(canvas_state, window_size, Some(&ext_mgr))
+        canvas_view(canvas_state, current_window_size, Some(&ext_mgr))
     };
 
     root = root.child(main_content);
@@ -173,9 +199,10 @@ fn app(path: Option<PathBuf>, ext_mgr: Arc<Mutex<ExtensionManager>>) -> impl Int
             match key_str.as_str() {
                 "o" | "O" => {
                     if let Some(path) = pick_image_file() {
+                        let win_size = *window_size.read();
                         match load_image(&path) {
                             Ok(img) => {
-                                canvas_state.with_mut(|mut st| st.set_image(img, window_size))
+                                canvas_state.with_mut(|mut st| st.set_image(img, win_size))
                             }
                             Err(err) => canvas_state.with_mut(|mut st| st.set_error(err)),
                         }
@@ -197,9 +224,19 @@ fn app(path: Option<PathBuf>, ext_mgr: Arc<Mutex<ExtensionManager>>) -> impl Int
                     }
                 }
                 "f" | "F" => {
+                    Platform::get().with_window(None, |w| {
+                        let is_max = w.is_maximized();
+                        w.set_maximized(!is_max);
+                    });
+                }
+                "h" | "H" => {
                     if canvas_state.read().image.is_some() {
-                        canvas_state.with_mut(|mut st| st.fit_to_window(window_size));
+                        let win_size = *window_size.read();
+                        canvas_state.with_mut(|mut st| st.toggle_fit_axis(win_size));
                     }
+                }
+                "q" | "Q" => {
+                    std::process::exit(0);
                 }
                 "Escape" => {
                     if canvas_state.read().image.is_some() {

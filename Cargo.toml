@@ -30,3 +30,6 @@ opt-level = 3
 lto = "thin"
 strip = true
 
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
+

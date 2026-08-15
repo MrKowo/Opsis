@@ -1,10 +1,13 @@
 use freya::prelude::*;
 use opsis_extension_api::ExtensionManifest;
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use crate::manager::ExtensionManager;
 
-/// Spawns the native floating Settings & Extensions window.
+const APP_ICON: &[u8] = include_bytes!("../assets/icon.png");
+
+/// Spawns the native floating Settings window.
 pub fn open_settings_window(ext_mgr: Arc<Mutex<ExtensionManager>>) {
     spawn(async move {
         let _ = Platform::get()
@@ -13,9 +16,10 @@ pub fn open_settings_window(ext_mgr: Arc<Mutex<ExtensionManager>>) {
                     let ext_mgr = Arc::clone(&ext_mgr);
                     settings_window_view(ext_mgr)
                 })
-                .with_title("Opsis - Settings")
-                .with_size(740.0, 560.0)
-                .with_background(Color::from_rgb(14, 14, 18)),
+                .with_title("Settings")
+                .with_icon(LaunchConfig::window_icon(APP_ICON))
+                .with_size(680.0, 480.0)
+                .with_background(Color::from_rgb(18, 18, 20)),
             )
             .await;
     });
@@ -43,16 +47,26 @@ fn settings_window_view(ext_mgr: Arc<Mutex<ExtensionManager>>) -> Element {
     rect()
         .width(Size::fill())
         .height(Size::fill())
-        .background(Color::from_rgb(14, 14, 18))
+        .background(Color::from_rgb(18, 18, 20))
+        .on_global_key_down(move |e: Event<KeyboardEventData>| {
+            let key_str = match &e.key {
+                Key::Character(c) => c.clone(),
+                Key::Named(named) => format!("{named:?}"),
+            };
+            if key_str == "q" || key_str == "Q" || key_str == "Escape" {
+                let _ = Platform::get().post_callback(move |window_id, ctx| {
+                    ctx.windows.remove(&window_id);
+                });
+            }
+        })
         .direction(Direction::horizontal())
         .child(build_sidebar(current_tab, active_tab))
         .child(
             rect()
                 .width(Size::fill())
                 .height(Size::fill())
-                .padding(Gaps::new_all(24.0))
+                .padding(Gaps::new_all(20.0))
                 .direction(Direction::vertical())
-                .spacing(16.0)
                 .child(match current_tab {
                     0 => build_general_pane(),
                     1 => build_appearance_pane(),
@@ -80,64 +94,45 @@ fn build_sidebar(current_tab: usize, mut active_tab: State<usize>) -> Element {
     ];
 
     rect()
-        .width(Size::px(180.0))
+        .width(Size::px(140.0))
         .height(Size::fill())
-        .background(Color::from_rgb(20, 20, 24))
-        .border(Border::new().width(1.0).fill(Color::from_rgb(35, 35, 42)))
-        .padding(Gaps::new(18.0, 10.0, 18.0, 10.0))
+        .background(Color::from_rgb(14, 14, 16))
+        .border(Border::new().width(1.0).fill(Color::from_rgb(28, 28, 32)))
+        .padding(Gaps::new(16.0, 8.0, 16.0, 8.0))
         .direction(Direction::vertical())
-        .spacing(6.0)
-        .children(
-            std::iter::once(
-                rect()
-                    .padding(Gaps::new(0.0, 10.0, 10.0, 10.0))
-                    .child(
-                        label()
-                            .text("Settings")
-                            .font_size(16.0)
-                            .font_weight(FontWeight::BOLD)
-                            .color(Color::WHITE),
-                    )
-                    .into(),
-            )
-            .chain(tabs.into_iter().map(|(idx, title)| {
-                let is_active = current_tab == idx;
+        .spacing(2.0)
+        .children(tabs.into_iter().map(|(idx, title)| {
+            let is_active = current_tab == idx;
 
-                rect()
-                    .width(Size::fill())
-                    .background(if is_active {
-                        Color::from_rgb(36, 36, 44)
-                    } else {
-                        Color::TRANSPARENT
-                    })
-                    .border(if is_active {
-                        Border::new().width(1.0).fill(Color::from_rgb(52, 52, 62))
-                    } else {
-                        Border::new().width(0.0).fill(Color::TRANSPARENT)
-                    })
-                    .corner_radius(6.0)
-                    .padding(Gaps::new(8.0, 12.0, 8.0, 12.0))
-                    .on_press(move |_| {
-                        active_tab.set(idx);
-                    })
-                    .child(
-                        label()
-                            .text(title)
-                            .font_size(13.0)
-                            .font_weight(if is_active {
-                                FontWeight::BOLD
-                            } else {
-                                FontWeight::NORMAL
-                            })
-                            .color(if is_active {
-                                Color::WHITE
-                            } else {
-                                Color::from_rgb(160, 160, 170)
-                            }),
-                    )
-                    .into()
-            })),
-        )
+            rect()
+                .width(Size::fill())
+                .background(if is_active {
+                    Color::from_rgb(28, 28, 34)
+                } else {
+                    Color::TRANSPARENT
+                })
+                .corner_radius(4.0)
+                .padding(Gaps::new(6.0, 10.0, 6.0, 10.0))
+                .on_press(move |_| {
+                    active_tab.set(idx);
+                })
+                .child(
+                    label()
+                        .text(title)
+                        .font_size(13.0)
+                        .font_weight(if is_active {
+                            FontWeight::BOLD
+                        } else {
+                            FontWeight::NORMAL
+                        })
+                        .color(if is_active {
+                            Color::WHITE
+                        } else {
+                            Color::from_rgb(140, 140, 150)
+                        }),
+                )
+                .into()
+        }))
         .into()
 }
 
@@ -145,19 +140,19 @@ fn build_general_pane() -> Element {
     rect()
         .width(Size::fill())
         .direction(Direction::vertical())
-        .spacing(14.0)
+        .spacing(12.0)
         .child(
             label()
                 .text("General Settings")
-                .font_size(18.0)
+                .font_size(16.0)
                 .font_weight(FontWeight::BOLD)
                 .color(Color::WHITE),
         )
         .child(
             label()
-                .text("Host runtime configurations and defaults.")
-                .font_size(13.0)
-                .color(Color::from_rgb(140, 140, 150)),
+                .text("Runtime: Pure Microkernel Host (Freya / Skia)")
+                .font_size(12.0)
+                .color(Color::from_rgb(150, 150, 160)),
         )
         .into()
 }
@@ -166,19 +161,19 @@ fn build_appearance_pane() -> Element {
     rect()
         .width(Size::fill())
         .direction(Direction::vertical())
-        .spacing(14.0)
+        .spacing(12.0)
         .child(
             label()
                 .text("Appearance")
-                .font_size(18.0)
+                .font_size(16.0)
                 .font_weight(FontWeight::BOLD)
                 .color(Color::WHITE),
         )
         .child(
             label()
-                .text("Canvas theme, background styling, and visual options.")
-                .font_size(13.0)
-                .color(Color::from_rgb(140, 140, 150)),
+                .text("Theme: Neutral Dark")
+                .font_size(12.0)
+                .color(Color::from_rgb(150, 150, 160)),
         )
         .into()
 }
@@ -190,34 +185,23 @@ fn build_extensions_pane(
     ext_mgr: Arc<Mutex<ExtensionManager>>,
     mut refresh_trigger: State<usize>,
 ) -> Element {
+    let mut expanded_items = use_state(HashSet::<String>::new);
     let mut status_banner = use_state(|| None::<(String, bool)>);
-    let count = extensions.len();
     let ext_mgr_drop = Arc::clone(&ext_mgr);
 
     let status_banner_element: Element =
         if let Some((msg, is_success)) = status_banner.read().as_ref() {
             rect()
                 .width(Size::fill())
-                .background(if *is_success {
-                    Color::from_rgb(25, 45, 35)
-                } else {
-                    Color::from_rgb(50, 35, 25)
-                })
-                .border(Border::new().width(1.0).fill(if *is_success {
-                    Color::from_rgb(45, 90, 65)
-                } else {
-                    Color::from_rgb(110, 60, 40)
-                }))
-                .corner_radius(8.0)
-                .padding(Gaps::new(8.0, 12.0, 8.0, 12.0))
+                .padding(Gaps::new(4.0, 8.0, 4.0, 8.0))
                 .child(
                     label()
                         .text(msg.clone())
                         .font_size(12.0)
                         .color(if *is_success {
-                            Color::from_rgb(160, 240, 180)
+                            Color::from_rgb(140, 220, 160)
                         } else {
-                            Color::from_rgb(240, 170, 130)
+                            Color::from_rgb(220, 140, 120)
                         }),
                 )
                 .into()
@@ -225,202 +209,157 @@ fn build_extensions_pane(
             rect().into()
         };
 
-    let extensions_list_element: Element = if extensions.is_empty() {
+    let extensions_list: Element = if extensions.is_empty() {
         rect()
-            .padding(Gaps::new_all(24.0))
-            .direction(Direction::vertical())
-            .spacing(6.0)
-            .cross_align(Alignment::Center)
+            .padding(Gaps::new_all(16.0))
             .child(
                 label()
                     .text("No external extensions installed.")
-                    .font_size(14.0)
-                    .color(Color::from_rgb(180, 180, 190)),
-            )
-            .child(
-                label()
-                    .text("Drag & drop .opx packages above or place them in the extensions directory.")
                     .font_size(12.0)
-                    .color(Color::from_rgb(110, 110, 120)),
+                    .color(Color::from_rgb(120, 120, 130)),
             )
             .into()
     } else {
         rect()
+            .width(Size::fill())
             .direction(Direction::vertical())
-            .spacing(10.0)
-            .children(
-                extensions.into_iter().map(|ext| {
-                    rect()
-                        .background(Color::from_rgb(22, 22, 28))
-                        .border(Border::new().width(1.0).fill(Color::from_rgb(40, 40, 48)))
-                        .corner_radius(10.0)
-                        .padding(Gaps::new_all(14.0))
-                        .direction(Direction::vertical())
-                        .spacing(8.0)
-                        .child(
+            .children(extensions.into_iter().map(|ext| {
+                let id = ext.id.clone();
+                let is_expanded = expanded_items.read().contains(&id);
+                let id_for_click = id.clone();
+
+                rect()
+                    .width(Size::fill())
+                    .direction(Direction::vertical())
+                    .border(Border::new().width(1.0).fill(Color::from_rgb(28, 28, 32)))
+                    // Dropdown Header Row
+                    .child(
+                        rect()
+                            .width(Size::fill())
+                            .padding(Gaps::new(8.0, 10.0, 8.0, 10.0))
+                            .direction(Direction::horizontal())
+                            .main_align(Alignment::SpaceBetween)
+                            .cross_align(Alignment::Center)
+                            .background(if is_expanded {
+                                Color::from_rgb(24, 24, 28)
+                            } else {
+                                Color::from_rgb(18, 18, 22)
+                            })
+                            .on_press(move |_| {
+                                expanded_items.with_mut(|mut set| {
+                                    if set.contains(&id_for_click) {
+                                        set.remove(&id_for_click);
+                                    } else {
+                                        set.insert(id_for_click.clone());
+                                    }
+                                });
+                            })
+                            .child(
+                                rect()
+                                    .direction(Direction::horizontal())
+                                    .spacing(8.0)
+                                    .cross_align(Alignment::Center)
+                                    .child(
+                                        label()
+                                            .text(if is_expanded { "▼" } else { "▶" })
+                                            .font_size(10.0)
+                                            .color(Color::from_rgb(140, 140, 150)),
+                                    )
+                                    .child(
+                                        label()
+                                            .text(ext.name.clone())
+                                            .font_size(13.0)
+                                            .font_weight(FontWeight::BOLD)
+                                            .color(Color::WHITE),
+                                    ),
+                            )
+                            .child(
+                                label()
+                                    .text(format!("v{}", ext.version))
+                                    .font_size(12.0)
+                                    .color(Color::from_rgb(120, 120, 130)),
+                            ),
+                    )
+                    // Dropdown Expanded Body
+                    .maybe_child(if is_expanded {
+                        Some(
                             rect()
-                                .direction(Direction::horizontal())
-                                .main_align(Alignment::SpaceBetween)
-                                .cross_align(Alignment::Center)
-                                .child(
-                                    rect()
-                                        .direction(Direction::horizontal())
-                                        .spacing(8.0)
-                                        .cross_align(Alignment::Center)
-                                        .child(
-                                            label()
-                                                .text(ext.name)
-                                                .font_size(14.0)
-                                                .font_weight(FontWeight::BOLD)
-                                                .color(Color::WHITE),
-                                        )
-                                        .child(
-                                            rect()
-                                                .background(Color::from_rgb(35, 55, 45))
-                                                .border(
-                                                    Border::new()
-                                                        .width(1.0)
-                                                        .fill(Color::from_rgb(50, 100, 75)),
-                                                )
-                                                .corner_radius(4.0)
-                                                .padding(Gaps::new(2.0, 6.0, 2.0, 6.0))
-                                                .child(
-                                                    label()
-                                                        .text(format!("v{}", ext.version))
-                                                        .font_size(11.0)
-                                                        .color(Color::from_rgb(140, 230, 170)),
-                                                ),
-                                        ),
-                                )
+                                .width(Size::fill())
+                                .padding(Gaps::new(10.0, 26.0, 10.0, 26.0))
+                                .background(Color::from_rgb(14, 14, 16))
+                                .direction(Direction::vertical())
+                                .spacing(4.0)
                                 .child(
                                     label()
-                                        .text(ext.id)
+                                        .text(format!("ID: {}", ext.id))
                                         .font_size(11.0)
-                                        .color(Color::from_rgb(100, 100, 115)),
-                                ),
-                        )
-                        .child(
-                            label()
-                                .text(ext.description)
-                                .font_size(12.0)
-                                .color(Color::from_rgb(160, 160, 170)),
-                        )
-                        .child(
-                            rect()
-                                .direction(Direction::horizontal())
-                                .spacing(12.0)
-                                .cross_align(Alignment::Center)
+                                        .color(Color::from_rgb(130, 130, 140)),
+                                )
                                 .child(
                                     label()
                                         .text(format!("Author: {}", ext.author))
                                         .font_size(11.0)
-                                        .color(Color::from_rgb(120, 120, 130)),
+                                        .color(Color::from_rgb(130, 130, 140)),
                                 )
                                 .child(
                                     label()
                                         .text(format!("API Version: {}", ext.api_version))
                                         .font_size(11.0)
-                                        .color(Color::from_rgb(120, 120, 130)),
+                                        .color(Color::from_rgb(130, 130, 140)),
+                                )
+                                .child(
+                                    label()
+                                        .text(format!("Description: {}", ext.description))
+                                        .font_size(11.0)
+                                        .color(Color::from_rgb(160, 160, 170)),
                                 ),
                         )
-                        .into()
-                }),
-            )
+                    } else {
+                        None
+                    })
+                    .into()
+            }))
             .into()
     };
 
     rect()
         .width(Size::fill())
+        .height(Size::fill())
         .direction(Direction::vertical())
-        .spacing(14.0)
+        .spacing(10.0)
         .child(
             rect()
                 .direction(Direction::horizontal())
                 .main_align(Alignment::SpaceBetween)
                 .cross_align(Alignment::Center)
                 .child(
-                    rect()
-                        .direction(Direction::vertical())
-                        .spacing(4.0)
-                        .child(
-                            label()
-                                .text("Installed Extensions")
-                                .font_size(18.0)
-                                .font_weight(FontWeight::BOLD)
-                                .color(Color::WHITE),
-                        )
-                        .child(
-                            label()
-                                .text(format!(
-                                    "{} extension{} currently active",
-                                    count,
-                                    if count == 1 { "" } else { "s" }
-                                ))
-                                .font_size(12.0)
-                                .color(Color::from_rgb(140, 140, 150)),
-                        ),
+                    label()
+                        .text("Extensions")
+                        .font_size(16.0)
+                        .font_weight(FontWeight::BOLD)
+                        .color(Color::WHITE),
                 )
                 .child(
-                    rect()
-                        .background(Color::from_rgb(26, 26, 34))
-                        .border(Border::new().width(1.0).fill(Color::from_rgb(44, 44, 56)))
-                        .corner_radius(6.0)
-                        .padding(Gaps::new(4.0, 10.0, 4.0, 10.0))
-                        .child(
-                            label()
-                                .text(if is_portable {
-                                    "Mode: Portable"
-                                } else {
-                                    "Mode: System Profile"
-                                })
-                                .font_size(11.0)
-                                .font_weight(FontWeight::BOLD)
-                                .color(if is_portable {
-                                    Color::from_rgb(130, 200, 255)
-                                } else {
-                                    Color::from_rgb(220, 180, 100)
-                                }),
-                        ),
+                    label()
+                        .text(if is_portable {
+                            "Mode: Portable"
+                        } else {
+                            "Mode: User Profile"
+                        })
+                        .font_size(11.0)
+                        .color(Color::from_rgb(130, 130, 140)),
                 ),
         )
-        .child(
-            rect()
-                .background(Color::from_rgb(22, 22, 28))
-                .border(Border::new().width(1.0).fill(Color::from_rgb(38, 38, 46)))
-                .corner_radius(8.0)
-                .padding(Gaps::new(10.0, 14.0, 10.0, 14.0))
-                .direction(Direction::horizontal())
-                .main_align(Alignment::SpaceBetween)
-                .cross_align(Alignment::Center)
-                .child(
-                    rect()
-                        .direction(Direction::vertical())
-                        .spacing(2.0)
-                        .child(
-                            label()
-                                .text("Discovery Directory")
-                                .font_size(12.0)
-                                .font_weight(FontWeight::BOLD)
-                                .color(Color::from_rgb(180, 180, 190)),
-                        )
-                        .child(
-                            label()
-                                .text(ext_dir)
-                                .font_size(11.0)
-                                .color(Color::from_rgb(110, 110, 125)),
-                        ),
-                ),
-        )
+        // Simple Drop & Discovery Area
         .child(
             rect()
                 .width(Size::fill())
-                .background(Color::from_rgb(20, 24, 32))
-                .border(Border::new().width(1.5).fill(Color::from_rgb(45, 65, 95)))
-                .corner_radius(8.0)
-                .padding(Gaps::new_all(16.0))
-                .direction(Direction::vertical())
+                .padding(Gaps::new(8.0, 10.0, 8.0, 10.0))
+                .background(Color::from_rgb(14, 14, 16))
+                .border(Border::new().width(1.0).fill(Color::from_rgb(28, 28, 32)))
+                .direction(Direction::horizontal())
+                .main_align(Alignment::SpaceBetween)
                 .cross_align(Alignment::Center)
-                .spacing(4.0)
                 .on_file_drop(move |e: Event<FileEventData>| {
                     if let Some(ref src_path) = e.file_path {
                         let ext = src_path
@@ -440,7 +379,7 @@ fn build_extensions_pane(
                                         manager.discover_and_load_all();
                                         status_banner.set(Some((
                                             format!(
-                                                "Successfully installed {}",
+                                                "Installed {}",
                                                 file_name.to_string_lossy()
                                             ),
                                             true,
@@ -452,8 +391,7 @@ fn build_extensions_pane(
                             }
                         } else {
                             status_banner.set(Some((
-                                "Please drop an .opx bundle or native dynamic library (.dll/.so/.dylib)"
-                                    .to_string(),
+                                "Please drop an .opx package or dynamic library".to_string(),
                                 false,
                             )));
                         }
@@ -461,85 +399,145 @@ fn build_extensions_pane(
                 })
                 .child(
                     label()
-                        .text("Drag & drop .opx packages or dynamic libraries here to install")
-                        .font_size(13.0)
-                        .font_weight(FontWeight::BOLD)
-                        .color(Color::from_rgb(200, 200, 220)),
+                        .text("Drop .opx or dynamic library here to install")
+                        .font_size(11.0)
+                        .color(Color::from_rgb(150, 150, 160)),
                 )
                 .child(
                     label()
-                        .text(
-                            "Extensions activate instantly and are saved to the extensions directory.",
-                        )
-                        .font_size(11.0)
-                        .color(Color::from_rgb(130, 130, 140)),
+                        .text(ext_dir)
+                        .font_size(10.0)
+                        .color(Color::from_rgb(100, 100, 110)),
                 ),
         )
         .child(status_banner_element)
-        .child(extensions_list_element)
+        // Scrollable Extensions Dropdown List
+        .child(
+            ScrollView::new()
+                .width(Size::fill())
+                .height(Size::fill())
+                .child(extensions_list),
+        )
         .into()
 }
 
 fn build_shortcuts_pane() -> Element {
     let shortcuts = [
-        ("O", "Open Image Picker"),
-        ("+ / =", "Zoom In"),
-        ("- / _", "Zoom Out"),
-        ("0", "100% Original Size (1:1)"),
-        ("F", "Fit Image to Window"),
-        ("Escape", "Clear Loaded Image"),
-        ("S", "Toggle Settings Window"),
-        ("Drag & Drop", "Load Image from Desktop or File Manager"),
+        ("Open Image Picker", "O"),
+        ("Zoom In", "+ / ="),
+        ("Zoom Out", "- / _"),
+        ("100% Original Size (1:1)", "0"),
+        ("Toggle Horizontal / Vertical Fit", "H"),
+        ("Toggle Window Maximize", "F"),
+        ("Clear Loaded Image", "Escape"),
+        ("Toggle Settings Window", "S"),
+        ("Close Window / Exit", "Q"),
+        ("Load Image via Drag & Drop", "Drag & Drop"),
     ];
 
     rect()
         .width(Size::fill())
+        .height(Size::fill())
         .direction(Direction::vertical())
-        .spacing(14.0)
+        .spacing(10.0)
         .child(
             label()
                 .text("Keyboard Shortcuts")
-                .font_size(18.0)
+                .font_size(16.0)
                 .font_weight(FontWeight::BOLD)
                 .color(Color::WHITE),
         )
         .child(
             rect()
+                .width(Size::fill())
+                .height(Size::fill())
                 .direction(Direction::vertical())
-                .spacing(8.0)
-                .children(shortcuts.into_iter().map(|(key, desc)| {
-                    rect()
-                        .background(Color::from_rgb(22, 22, 28))
-                        .border(Border::new().width(1.0).fill(Color::from_rgb(38, 38, 46)))
-                        .corner_radius(8.0)
-                        .padding(Gaps::new(10.0, 14.0, 10.0, 14.0))
-                        .direction(Direction::horizontal())
-                        .main_align(Alignment::SpaceBetween)
-                        .cross_align(Alignment::Center)
-                        .child(
-                            label()
-                                .text(desc)
-                                .font_size(13.0)
-                                .color(Color::from_rgb(210, 210, 220)),
-                        )
+                .border(Border::new().width(1.0).fill(Color::from_rgb(28, 28, 32)))
+                .child(shortcuts_table_header("Action", "Key"))
+                .child(
+                    ScrollView::new()
+                        .width(Size::fill())
+                        .height(Size::fill())
                         .child(
                             rect()
-                                .background(Color::from_rgb(36, 36, 44))
-                                .border(
-                                    Border::new().width(1.0).fill(Color::from_rgb(52, 52, 64)),
-                                )
-                                .corner_radius(6.0)
-                                .padding(Gaps::new(4.0, 8.0, 4.0, 8.0))
-                                .child(
-                                    label()
-                                        .text(key)
-                                        .font_size(12.0)
-                                        .font_weight(FontWeight::BOLD)
-                                        .color(Color::from_rgb(180, 210, 255)),
-                                ),
-                        )
-                        .into()
-                })),
+                                .width(Size::fill())
+                                .direction(Direction::vertical())
+                                .children(shortcuts.into_iter().enumerate().map(|(idx, (action, key))| {
+                                    shortcuts_table_row(action, key, idx % 2 == 0)
+                                })),
+                        ),
+                ),
+        )
+        .into()
+}
+
+fn shortcuts_table_header(left: &'static str, right: &'static str) -> Element {
+    rect()
+        .width(Size::fill())
+        .background(Color::from_rgb(14, 14, 16))
+        .padding(Gaps::new(8.0, 20.0, 8.0, 16.0))
+        .direction(Direction::horizontal())
+        .border(Border::new().width(1.0).fill(Color::from_rgb(28, 28, 32)))
+        .child(
+            rect()
+                .width(Size::percent(50.0))
+                .child(
+                    label()
+                        .text(left)
+                        .font_size(12.0)
+                        .font_weight(FontWeight::BOLD)
+                        .color(Color::from_rgb(140, 140, 150)),
+                ),
+        )
+        .child(
+            rect()
+                .width(Size::percent(50.0))
+                .child(
+                    label()
+                        .text(right)
+                        .width(Size::fill())
+                        .text_align(TextAlign::Right)
+                        .font_size(12.0)
+                        .font_weight(FontWeight::BOLD)
+                        .color(Color::from_rgb(140, 140, 150)),
+                ),
+        )
+        .into()
+}
+
+fn shortcuts_table_row(action: &'static str, key: &'static str, is_even: bool) -> Element {
+    rect()
+        .width(Size::fill())
+        .background(if is_even {
+            Color::from_rgb(18, 18, 20)
+        } else {
+            Color::from_rgb(15, 15, 17)
+        })
+        .padding(Gaps::new(8.0, 20.0, 8.0, 16.0))
+        .direction(Direction::horizontal())
+        .cross_align(Alignment::Center)
+        .child(
+            rect()
+                .width(Size::percent(50.0))
+                .child(
+                    label()
+                        .text(action)
+                        .font_size(12.0)
+                        .color(Color::from_rgb(170, 170, 180)),
+                ),
+        )
+        .child(
+            rect()
+                .width(Size::percent(50.0))
+                .child(
+                    label()
+                        .text(key)
+                        .width(Size::fill())
+                        .text_align(TextAlign::Right)
+                        .font_size(12.0)
+                        .font_weight(FontWeight::BOLD)
+                        .color(Color::WHITE),
+                ),
         )
         .into()
 }
@@ -548,47 +546,25 @@ fn build_about_pane() -> Element {
     rect()
         .width(Size::fill())
         .direction(Direction::vertical())
-        .spacing(14.0)
+        .spacing(10.0)
         .child(
             label()
-                .text("About Opsis")
-                .font_size(18.0)
+                .text("About")
+                .font_size(16.0)
                 .font_weight(FontWeight::BOLD)
                 .color(Color::WHITE),
         )
         .child(
-            rect()
-                .background(Color::from_rgb(22, 22, 28))
-                .border(Border::new().width(1.0).fill(Color::from_rgb(38, 38, 46)))
-                .corner_radius(10.0)
-                .padding(Gaps::new_all(18.0))
-                .direction(Direction::vertical())
-                .spacing(10.0)
-                .child(
-                    label()
-                        .text("Opsis Image Viewer")
-                        .font_size(15.0)
-                        .font_weight(FontWeight::BOLD)
-                        .color(Color::WHITE),
-                )
-                .child(
-                    label()
-                        .text("Ultra-lightweight, portable, high-performance image viewer built with Rust, Freya, and Skia.")
-                        .font_size(12.0)
-                        .color(Color::from_rgb(160, 160, 175)),
-                )
-                .child(
-                    label()
-                        .text("Architecture: Pure Microkernel Extension-First with Dedicated Window Host")
-                        .font_size(11.0)
-                        .color(Color::from_rgb(120, 180, 240)),
-                )
-                .child(
-                    label()
-                        .text("Version: 0.1.0 • License: MIT")
-                        .font_size(11.0)
-                        .color(Color::from_rgb(110, 110, 120)),
-                ),
+            label()
+                .text("Opsis Image Viewer • Version 0.1.0 • License: MIT")
+                .font_size(12.0)
+                .color(Color::from_rgb(160, 160, 170)),
+        )
+        .child(
+            label()
+                .text("Ultra-lightweight, portable image viewer built with Rust, Freya, and Skia.")
+                .font_size(11.0)
+                .color(Color::from_rgb(120, 120, 130)),
         )
         .into()
 }

@@ -43,4 +43,14 @@ fn main() {
             }
         }
     }
+
+    #[cfg(windows)]
+    {
+        println!("cargo:rerun-if-changed=assets/icon.ico");
+        let mut res = winres::WindowsResource::new();
+        res.set_icon("assets/icon.ico");
+        if let Err(err) = res.compile() {
+            eprintln!("[build.rs] Warning: Could not compile Windows icon resource: {}", err);
+        }
+    }
 }

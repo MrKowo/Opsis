@@ -19,3 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Built-in Native Settings Window (`src/settings.rs`)**: Vertical tab navigation (General, Appearance, Extensions, Shortcuts, About) with live extension status inspection.
 - **Drag-and-Drop Extension Installer**: Interactive drop zone in Settings &rarr; Extensions allowing instant installation, hot-loading, and list refresh for `.opx`, `.dll`, `.so`, and `.dylib` files.
 - **Automated Extension Deployment (`build.rs`)**: Build script that automatically copies the root `extensions/` directory into the active `target/<profile>/extensions/` output directory during `cargo build`.
+- **Application Icon & Windows Resource Embedding**: Embedded 256x256 icon resource via `winres` for native Windows Explorer and Taskbar support, with runtime window icon configuration across all windows.
+- **Universal Window Closing (`Q` / `Escape`)**: Added universal shortcut to cleanly close focused windows or exit the application.
+- **Dynamic 50/50 Shortcuts Table & Empty Watermark Hints**: Structured 50/50 centered layout for Settings shortcuts with right-justified keys, and added file open (`O`) hint to base canvas watermark.
+

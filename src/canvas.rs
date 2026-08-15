@@ -100,6 +100,7 @@ impl CanvasState {
     }
 
     /// Fit the current image to the given window dimensions.
+    #[allow(dead_code)]
     pub fn fit_to_window(&mut self, window_size: (f64, f64)) {
         if let Some(ref img) = self.image {
             let (w, h) = img.metadata.dimensions;
@@ -109,6 +110,49 @@ impl CanvasState {
                 let scale_x = available_w / w as f32;
                 let scale_y = available_h / h as f32;
                 self.zoom = scale_x.min(scale_y).clamp(0.02, 50.0);
+                self.pan_offset = (0.0, 0.0);
+            }
+        }
+    }
+
+    /// Fit the image horizontally to fill the viewport width (touching left/right borders).
+    #[allow(dead_code)]
+    pub fn fit_horizontal(&mut self, window_size: (f64, f64)) {
+        if let Some(ref img) = self.image {
+            let (w, _h) = img.metadata.dimensions;
+            if w > 0 {
+                self.zoom = (window_size.0 as f32 / w as f32).clamp(0.001, 100.0);
+                self.pan_offset = (0.0, 0.0);
+            }
+        }
+    }
+
+    /// Fit the image vertically to fill the viewport height (touching top/bottom borders).
+    #[allow(dead_code)]
+    pub fn fit_vertical(&mut self, window_size: (f64, f64)) {
+        if let Some(ref img) = self.image {
+            let (_w, h) = img.metadata.dimensions;
+            if h > 0 {
+                self.zoom = (window_size.1 as f32 / h as f32).clamp(0.001, 100.0);
+                self.pan_offset = (0.0, 0.0);
+            }
+        }
+    }
+
+    /// Toggle between horizontal fit (touching left/right edges) and vertical fit (touching top/bottom edges).
+    pub fn toggle_fit_axis(&mut self, window_size: (f64, f64)) {
+        if let Some(ref img) = self.image {
+            let (w, h) = img.metadata.dimensions;
+            if w > 0 && h > 0 {
+                let scale_h = (window_size.0 as f32 / w as f32).clamp(0.001, 100.0);
+                let scale_v = (window_size.1 as f32 / h as f32).clamp(0.001, 100.0);
+
+                // If currently closer to horizontal fit, switch to vertical; otherwise switch to horizontal
+                if (self.zoom - scale_h).abs() < (self.zoom - scale_v).abs() {
+                    self.zoom = scale_v;
+                } else {
+                    self.zoom = scale_h;
+                }
                 self.pan_offset = (0.0, 0.0);
             }
         }
@@ -300,14 +344,25 @@ pub fn canvas_view(
                     .direction(Direction::vertical())
                     .cross_align(Alignment::Center)
                     .spacing(14.0)
-                    .children([
-                        logo_element,
-                        label()
-                            .text("Press S to open settings")
-                            .font_size(12.0)
-                            .color(Color::from_argb(45, 255, 255, 255))
-                            .into(),
-                    ]),
+                    .child(logo_element)
+                    .child(
+                        rect()
+                            .direction(Direction::vertical())
+                            .cross_align(Alignment::Center)
+                            .spacing(6.0)
+                            .child(
+                                label()
+                                    .text("Press O to open an image")
+                                    .font_size(12.0)
+                                    .color(Color::from_argb(50, 255, 255, 255)),
+                            )
+                            .child(
+                                label()
+                                    .text("Press S to open settings")
+                                    .font_size(12.0)
+                                    .color(Color::from_argb(35, 255, 255, 255)),
+                            ),
+                    ),
             )
             .into()
     }
@@ -340,5 +395,62 @@ mod tests {
         assert_eq!(state.zoom, 1.0);
         state.reset_zoom();
         assert_eq!(state.zoom, 1.0);
+    }
+
+    #[test]
+    fn test_fit_and_toggle_axis() {
+        use crate::file_io::{ImageMetadata, LoadedImage};
+        use bytes::Bytes;
+        use std::path::PathBuf;
+
+        let mut state = CanvasState::new();
+        state.image = Some(LoadedImage {
+            bytes: Bytes::new(),
+            rgba_bytes: None,
+            metadata: ImageMetadata {
+                path: PathBuf::from("test.png"),
+                filename: "test.png".to_string(),
+                format_name: "PNG".to_string(),
+                dimensions: (1000, 500),
+                file_size_bytes: 1024,
+            },
+        });
+
+        // Window 1000x1000: horizontal fit zoom = 1.0, vertical fit zoom = 2.0
+        state.fit_horizontal((1000.0, 1000.0));
+        assert!((state.zoom - 1.0).abs() < 0.01);
+
+        state.fit_vertical((1000.0, 1000.0));
+        assert!((state.zoom - 2.0).abs() < 0.01);
+
+        // Toggle from vertical should switch to horizontal
+        state.toggle_fit_axis((1000.0, 1000.0));
+        assert!((state.zoom - 1.0).abs() < 0.01);
+
+        // Toggle from horizontal should switch to vertical
+        state.toggle_fit_axis((1000.0, 1000.0));
+        assert!((state.zoom - 2.0).abs() < 0.01);
+
+        state.fit_to_window((1000.0, 1000.0));
+        assert!(state.zoom > 0.0);
+    }
+
+    #[test]
+    fn test_generate_and_verify_app_icon() {
+        let logo_bytes = include_bytes!("../assets/logo.png");
+        let img = image::load_from_memory(logo_bytes).expect("Failed to load logo.png");
+        let (orig_w, orig_h) = (img.width(), img.height());
+        println!("Original logo dimensions: {}x{}", orig_w, orig_h);
+
+        // Resize cleanly with Lanczos3 to standard 256x256 app icon
+        let icon_256 = img.resize_exact(256, 256, image::imageops::FilterType::Lanczos3);
+        let icon_path = std::path::Path::new("assets/icon.png");
+        icon_256.save(icon_path).expect("Failed to save icon.png");
+
+        let ico_path = std::path::Path::new("assets/icon.ico");
+        icon_256.save(ico_path).expect("Failed to save icon.ico");
+
+        assert!(icon_path.exists());
+        assert!(ico_path.exists());
     }
 }

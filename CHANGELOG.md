@@ -22,4 +22,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Application Icon & Windows Resource Embedding**: Embedded 256x256 icon resource via `winres` for native Windows Explorer and Taskbar support, with runtime window icon configuration across all windows.
 - **Universal Window Closing (`Q` / `Escape`)**: Added universal shortcut to cleanly close focused windows or exit the application.
 - **Dynamic 50/50 Shortcuts Table & Empty Watermark Hints**: Structured 50/50 centered layout for Settings shortcuts with right-justified keys, and added file open (`O`) hint to base canvas watermark.
+- **Executable PE Metadata & Settings Versioning**: Embedded `OriginalFilename`, `InternalName`, `ProductName`, `ProductVersion`, and `FileVersion` in Windows binary properties via `build.rs`, and exposed dynamic package version in Settings &rarr; About.
+- **Canonical Extension Discovery & Safe Bundle Caching**: Deduplicated candidate scan directories via canonical path hashing in `src/manager.rs`, added timestamp-based cache revalidation, and graceful lock fallback for loaded dynamic libraries in `src/bundle.rs`.
 

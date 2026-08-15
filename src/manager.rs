@@ -109,16 +109,25 @@ impl ExtensionManager {
 
     /// Discover and load all extensions across portable and system directories.
     pub fn discover_and_load_all(&mut self) {
-        let mut dirs_to_scan = vec![self.extensions_dir.clone()];
+        let mut dirs_to_scan = Vec::new();
+        let mut seen_dirs = std::collections::HashSet::new();
 
-        let cwd_extensions = PathBuf::from("extensions");
-        if cwd_extensions.exists() && !dirs_to_scan.contains(&cwd_extensions) {
-            dirs_to_scan.push(cwd_extensions);
-        }
+        let candidates = [
+            self.extensions_dir.clone(),
+            PathBuf::from("extensions"),
+            get_system_user_extensions_dir(),
+        ];
 
-        let system_extensions = get_system_user_extensions_dir();
-        if system_extensions.exists() && !dirs_to_scan.contains(&system_extensions) {
-            dirs_to_scan.push(system_extensions);
+        for dir in candidates {
+            if dir.exists() {
+                if let Ok(canonical) = dir.canonicalize() {
+                    if seen_dirs.insert(canonical) {
+                        dirs_to_scan.push(dir);
+                    }
+                } else if seen_dirs.insert(dir.clone()) {
+                    dirs_to_scan.push(dir);
+                }
+            }
         }
 
         for dir in dirs_to_scan {

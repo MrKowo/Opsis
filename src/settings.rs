@@ -543,6 +543,9 @@ fn shortcuts_table_row(action: &'static str, key: &'static str, is_even: bool) -
 }
 
 fn build_about_pane() -> Element {
+    const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
+    let version_info = format!("Opsis Image Viewer • Version {} • License: MIT", PKG_VERSION);
+
     rect()
         .width(Size::fill())
         .direction(Direction::vertical())
@@ -556,7 +559,7 @@ fn build_about_pane() -> Element {
         )
         .child(
             label()
-                .text("Opsis Image Viewer • Version 0.1.0 • License: MIT")
+                .text(version_info)
                 .font_size(12.0)
                 .color(Color::from_rgb(160, 160, 170)),
         )

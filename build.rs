@@ -47,8 +47,16 @@ fn main() {
     #[cfg(windows)]
     {
         println!("cargo:rerun-if-changed=assets/icon.ico");
+        let version = env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.1.0".to_string());
         let mut res = winres::WindowsResource::new();
         res.set_icon("assets/icon.ico");
+        res.set("FileDescription", "Opsis Image Viewer");
+        res.set("ProductName", &format!("Opsis v{}", version));
+        res.set("ProductVersion", &version);
+        res.set("FileVersion", &version);
+        res.set("OriginalFilename", &format!("opsis-v{}.exe", version));
+        res.set("InternalName", &format!("opsis-v{}", version));
+        res.set("LegalCopyright", "Copyright (c) 2026 Opsis Contributors");
         if let Err(err) = res.compile() {
             eprintln!("[build.rs] Warning: Could not compile Windows icon resource: {}", err);
         }

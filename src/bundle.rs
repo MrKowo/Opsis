@@ -108,36 +108,61 @@ fn unpack_opx_archive(opx_path: &Path, cache_dir: &Path) -> Result<ExtensionBund
             .map_err(|e| format!("Failed to parse manifest.json: {e}"))?
     };
 
-    // Extract all files
-    for i in 0..archive.len() {
-        let mut file = archive
-            .by_index(i)
-            .map_err(|e| format!("Failed to read archive entry: {e}"))?;
-        let outpath = match file.enclosed_name() {
-            Some(path) => target_extract_dir.join(path),
-            None => continue,
-        };
-
-        if file.is_dir() {
-            std::fs::create_dir_all(&outpath)
-                .map_err(|e| format!("Failed to create dir in cache: {e}"))?;
-        } else {
-            if let Some(p) = outpath.parent() {
-                if !p.exists() {
-                    std::fs::create_dir_all(p)
-                        .map_err(|e| format!("Failed to create parent dir: {e}"))?;
-                }
-            }
-            let mut outfile = File::create(&outpath)
-                .map_err(|e| format!("Failed to extract file {:?}: {e}", outpath))?;
-            std::io::copy(&mut file, &mut outfile)
-                .map_err(|e| format!("Failed to write extracted file {:?}: {e}", outpath))?;
-        }
-    }
-
     // Locate the platform binary for the current operating system and architecture
     let platform_key = current_platform_key();
     let platform_bin_dir = target_extract_dir.join("bin").join(platform_key);
+
+    // Check if the cache is already up-to-date
+    let should_extract = if let Ok(bin) = find_dynamic_library_in_dir(&platform_bin_dir) {
+        if let (Ok(opx_meta), Ok(bin_meta)) = (opx_path.metadata(), bin.metadata()) {
+            if let (Ok(opx_time), Ok(bin_time)) = (opx_meta.modified(), bin_meta.modified()) {
+                bin_time < opx_time
+            } else {
+                true
+            }
+        } else {
+            true
+        }
+    } else {
+        true
+    };
+
+    if should_extract {
+        // Extract all files
+        for i in 0..archive.len() {
+            let mut file = archive
+                .by_index(i)
+                .map_err(|e| format!("Failed to read archive entry: {e}"))?;
+            let outpath = match file.enclosed_name() {
+                Some(path) => target_extract_dir.join(path),
+                None => continue,
+            };
+
+            if file.is_dir() {
+                std::fs::create_dir_all(&outpath)
+                    .map_err(|e| format!("Failed to create dir in cache: {e}"))?;
+            } else {
+                if let Some(p) = outpath.parent() {
+                    if !p.exists() {
+                        std::fs::create_dir_all(p)
+                            .map_err(|e| format!("Failed to create parent dir: {e}"))?;
+                    }
+                }
+                match File::create(&outpath) {
+                    Ok(mut outfile) => {
+                        std::io::copy(&mut file, &mut outfile)
+                            .map_err(|e| format!("Failed to write extracted file {:?}: {e}", outpath))?;
+                    }
+                    Err(e) => {
+                        // If file already exists and is locked by the active process, keep existing cached binary
+                        if !outpath.exists() {
+                            return Err(format!("Failed to extract file {:?}: {e}", outpath));
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     let binary_path = find_dynamic_library_in_dir(&platform_bin_dir)?;
 

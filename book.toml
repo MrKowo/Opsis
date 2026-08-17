@@ -3,7 +3,7 @@ title = "Opsis Documentation"
 authors = ["Opsis Contributors"]
 description = "Ultra-fast, lightweight, and extensible media viewer architecture and specification."
 language = "en"
-src = "."
+src = "src"
 
 [build]
 build-dir = "book"

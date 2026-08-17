@@ -1,0 +1,54 @@
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+
+  function getMermaidTheme() {
+    const isDark = !document.documentElement.classList.contains('light') &&
+                   !document.documentElement.classList.contains('rust');
+    return isDark ? 'dark' : 'default';
+  }
+
+  function renderMermaidDiagrams() {
+    const codeBlocks = document.querySelectorAll('pre code.language-mermaid');
+    if (codeBlocks.length === 0) return;
+
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: getMermaidTheme(),
+      securityLevel: 'loose'
+    });
+
+    codeBlocks.forEach((codeBlock) => {
+      const pre = codeBlock.parentElement;
+      const container = document.createElement('div');
+      container.className = 'mermaid';
+      container.textContent = codeBlock.textContent;
+      pre.replaceWith(container);
+    });
+
+    mermaid.run();
+  }
+
+  // Render on page load
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', renderMermaidDiagrams);
+  } else {
+    renderMermaidDiagrams();
+  }
+
+  // Re-render when theme changes in mdBook
+  const observer = new MutationObserver(() => {
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: getMermaidTheme(),
+      securityLevel: 'loose'
+    });
+  });
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+</script>
+<style>
+  .mermaid {
+    display: flex;
+    justify-content: center;
+    margin: 1.5rem 0;
+  }
+</style>

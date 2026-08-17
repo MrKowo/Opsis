@@ -1,0 +1,30 @@
+[book]
+title = "Opsis Documentation"
+authors = ["Opsis Contributors"]
+description = "Ultra-fast, lightweight, and extensible media viewer architecture and specification."
+language = "en"
+src = "."
+
+[build]
+build-dir = "book"
+
+[output.html]
+default-theme = "coal"
+preferred-dark-theme = "coal"
+git-repository-url = "https://github.com/MrKowo/Opsis"
+edit-url-template = "https://github.com/MrKowo/Opsis/edit/wiki/{path}"
+no-section-label = true
+
+[output.html.search]
+enable = true
+limit-results = 30
+use-boolean-and = true
+boost-title = 2
+boost-hierarchy = 1
+boost-paragraph = 1
+expand = true
+heading-split-level = 3
+
+[output.html.fold]
+enable = true
+level = 1

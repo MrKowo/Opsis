@@ -77,6 +77,7 @@ flowchart TB
 
 For detailed technical specifications, data contracts, and implementation architectures, refer to the individual documents:
 
+* **[Architecture & Technology Stack Specification](Architecture%20and%20Tech%20Stack.md):** Cargo workspace topology, crate responsibilities, dependency matrix, and concurrency model.
 * [Media Pipeline Specification](Media%20Pipeline.md): File discovery, async decoding, caching, metadata extraction, and decoder fuzz resiliency.
 * [Render Pipeline Specification](Render%20Pipeline.md):GPU canvas rendering, color management, image filtering, 3D scenes, and strict performance budgets.
 * [Window and UI Management Specification](Window%20and%20UI%20Management.md): Event handling, workspace layout, operators, UI panels, and portable configuration.

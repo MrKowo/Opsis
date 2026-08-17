@@ -1,6 +1,7 @@
-# Summary
+# Architecture & Design
 
-[Architecture Overview](Main.md)
+- [System Overview](Main.md)
+- [Architecture & Tech Stack](Architecture%20and%20Tech%20Stack.md)
 
 # Core Subsystems
 

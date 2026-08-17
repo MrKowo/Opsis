@@ -76,9 +76,13 @@ cargo run --release -- path/to/image.png
 ```
 ---
 
-## Extensions
+## Developing Extensions
 
-IF you're interested in developing extensions for Opsis, check out [Opsis-extensions](https://github.com/MrKowo/Opsis-extensions)
+Opsis is built on an **extension-first microkernel architecture**. Everything from pixel transformation filters, Blender-inspired `N`-Panel tabs, custom HUD overlays, and rebindable keyboard actions can be created as modular native dynamic libraries or cross-platform `.opx` archives.
+
+- 📖 **[Opsis Extension Developer Guide](docs/EXTENSIONS.md)** - Complete guide covering capability traits, `.opx` bundling, Freya UI integration, floating windows, and step-by-step examples.
+- 📦 **[`opsis_extension_api`](crates/opsis_extension_api)** - Public extension API crate definition.
+- 🧩 **[Opsis-extensions](https://github.com/MrKowo/Opsis-extensions)** - Community and sample extensions repository.
 
 ---
 

@@ -47,6 +47,7 @@ pub fn get_system_user_extensions_dir() -> PathBuf {
     }
 }
 
+use crate::config::AppSettings;
 use crate::hotkeys::{HotkeyRegistry, KeyDispatchResult};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -61,6 +62,7 @@ pub struct ExtensionManager {
     pub registry: ExtensionRegistry,
     pub loaded_extensions: Vec<LoadedExtension>,
     pub hotkey_registry: HotkeyRegistry,
+    pub settings: AppSettings,
     pub is_loading: Arc<AtomicBool>,
 }
 
@@ -129,6 +131,8 @@ impl ExtensionManager {
         let mut hotkey_registry = HotkeyRegistry::new();
         hotkey_registry.load_keybindings(&config_dir);
 
+        let settings = AppSettings::load_from_dir(&config_dir);
+
         Self {
             is_portable,
             extensions_dir: primary_extensions_dir,
@@ -137,8 +141,14 @@ impl ExtensionManager {
             registry: ExtensionRegistry::new(),
             loaded_extensions: Vec::new(),
             hotkey_registry,
+            settings,
             is_loading: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Save current application settings to config directory.
+    pub fn save_settings(&self) {
+        self.settings.save_to_dir(&self.config_dir);
     }
 
     /// Return list of extension directories to scan based on portable vs user mode.

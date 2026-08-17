@@ -2,6 +2,7 @@
 
 mod bundle;
 mod canvas;
+pub mod config;
 mod file_io;
 mod hotkeys;
 mod loader;

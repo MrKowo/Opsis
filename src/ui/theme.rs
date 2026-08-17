@@ -113,6 +113,91 @@ impl Theme {
     pub const FONT_BODY: f32 = 12.0;
     pub const FONT_SUBTITLE: f32 = 14.0;
     pub const FONT_TITLE: f32 = 16.0;
+
+    // --- Global Scrollbar Definition ---
+    /// Scrollbar thickness across all scroll views (pixels).
+    pub const SCROLLBAR_SIZE: f32 = 4.0;
+
+    /// Semantic scrollbar track background (transparent so track background never flashes/highlights).
+    pub const fn scrollbar_track() -> Color {
+        Color::TRANSPARENT
+    }
+
+    /// Semantic scrollbar thumb idle color (subtle neutral).
+    pub const fn scrollbar_thumb() -> Color {
+        Color::from_argb(100, 160, 170, 185)
+    }
+
+    /// Semantic scrollbar thumb hover color (brighter color on hover).
+    pub const fn scrollbar_thumb_hover() -> Color {
+        Color::from_argb(190, 210, 225, 245)
+    }
+
+    /// Semantic scrollbar thumb active/pressed color (brightest highlight).
+    pub const fn scrollbar_thumb_active() -> Color {
+        Color::from_argb(245, 230, 240, 255)
+    }
+
+    // --- Acrylic / Backdrop Blur Tokens ---
+    /// Default Gaussian blur radius sigma for frosted acrylic surfaces (pixels).
+    pub const ACRYLIC_BLUR_SIGMA: f32 = 0.0;
+
+    /// Primary acrylic backdrop alpha transparency value (0-255).
+    pub const ACRYLIC_ALPHA: u8 = 0;
+
+    /// Primary acrylic RGB tint color tuple.
+    pub const ACRYLIC_TINT_RGB: (u8, u8, u8) = (0, 0, 0);
+
+    /// Standard semi-transparent dark acrylic backdrop tint.
+    pub const fn acrylic_tint() -> Color {
+        Color::from_argb(
+            Self::ACRYLIC_ALPHA,
+            Self::ACRYLIC_TINT_RGB.0,
+            Self::ACRYLIC_TINT_RGB.1,
+            Self::ACRYLIC_TINT_RGB.2,
+        )
+    }
+
+    /// Subtle semi-transparent dark acrylic backdrop tint.
+    pub const fn acrylic_tint_subtle() -> Color {
+        Color::from_argb(
+            80,
+            Self::ACRYLIC_TINT_RGB.0,
+            Self::ACRYLIC_TINT_RGB.1,
+            Self::ACRYLIC_TINT_RGB.2,
+        )
+    }
+
+    /// Glassy highlight border for acrylic surfaces.
+    pub const fn acrylic_border() -> Color {
+        Color::from_argb(40, 255, 255, 255)
+    }
+
+    /// Semantic canvas / window background color based on whether acrylic blur is enabled.
+    pub const fn canvas_background(acrylic_enabled: bool) -> Color {
+        if acrylic_enabled {
+            Self::acrylic_tint()
+        } else {
+            Self::surface_base()
+        }
+    }
+
+    /// Builds the global Freya [`freya::prelude::Theme`] configured with
+    /// Opsis design system tokens and clean, non-highlighting scrollbars.
+    pub fn create_freya_theme() -> freya::prelude::Theme {
+        let mut theme = freya::prelude::Theme::new("dark", freya::prelude::DARK_COLORS);
+        theme.set(
+            "scrollbar",
+            freya::prelude::ScrollBarThemePreference {
+                background: freya::prelude::Preference::from(Self::scrollbar_track()),
+                thumb_background: freya::prelude::Preference::from(Self::scrollbar_thumb()),
+                hover_thumb_background: freya::prelude::Preference::from(Self::scrollbar_thumb_hover()),
+                active_thumb_background: freya::prelude::Preference::from(Self::scrollbar_thumb_active()),
+                size: freya::prelude::Preference::from(Self::SCROLLBAR_SIZE),
+            },
+        );
+        theme
+    }
 }
 
 #[cfg(test)]
@@ -128,5 +213,33 @@ mod tests {
         assert!(Theme::RADIUS_MD < Theme::RADIUS_LG);
         assert!(Theme::FONT_CAPTION < Theme::FONT_BODY);
         assert!(Theme::FONT_BODY < Theme::FONT_TITLE);
+    }
+
+    #[test]
+    fn test_scrollbar_theme_definition() {
+        assert_eq!(Theme::scrollbar_track(), Color::TRANSPARENT);
+        assert_ne!(Theme::scrollbar_thumb(), Theme::scrollbar_thumb_hover());
+        assert_ne!(Theme::scrollbar_thumb_hover(), Theme::scrollbar_thumb_active());
+        assert_eq!(Theme::SCROLLBAR_SIZE, 4.0);
+
+        let freya_theme = Theme::create_freya_theme();
+        let scrollbar_pref = freya_theme.get::<freya::prelude::ScrollBarThemePreference>("scrollbar");
+        assert!(scrollbar_pref.is_some());
+    }
+
+    #[test]
+    fn test_acrylic_theme_tokens() {
+        assert_eq!(
+            Theme::acrylic_tint(),
+            Color::from_argb(
+                Theme::ACRYLIC_ALPHA,
+                Theme::ACRYLIC_TINT_RGB.0,
+                Theme::ACRYLIC_TINT_RGB.1,
+                Theme::ACRYLIC_TINT_RGB.2,
+            )
+        );
+        assert_eq!(Theme::acrylic_border(), Color::from_argb(40, 255, 255, 255));
+        assert_eq!(Theme::canvas_background(true), Theme::acrylic_tint());
+        assert_eq!(Theme::canvas_background(false), Theme::surface_base());
     }
 }

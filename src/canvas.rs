@@ -4,6 +4,7 @@ use freya::engine::prelude::{AlphaType, Data, SkImage};
 use freya::prelude::*;
 
 use crate::file_io::{load_image, LoadedImage};
+use crate::ui::Theme;
 
 const BASE_LOGO: &[u8] = include_bytes!("../assets/logo.png");
 
@@ -49,25 +50,24 @@ impl CanvasState {
             .or_else(|| self.last_file_path.clone())
     }
 
-    /// Calculate default zoom: Auto-fit if image exceeds window, 1.0 (100%) otherwise.
+    /// Calculate default zoom: Auto-fit image to window dimensions.
     pub fn calculate_initial_zoom(img_w: u32, img_h: u32, win_w: f64, win_h: f64) -> f32 {
-        if img_w == 0 || img_h == 0 {
+        if img_w == 0 || img_h == 0 || win_w <= 0.0 || win_h <= 0.0 {
             return 1.0;
         }
 
-        let available_w = (win_w * 0.95).max(100.0) as f32;
-        let available_h = (win_h * 0.95).max(100.0) as f32;
+        let scale_x = win_w as f32 / img_w as f32;
+        let scale_y = win_h as f32 / img_h as f32;
+        scale_x.min(scale_y).clamp(0.001, 100.0)
+    }
 
-        let img_w_f = img_w as f32;
-        let img_h_f = img_h as f32;
-
-        if img_w_f > available_w || img_h_f > available_h {
-            let scale_x = available_w / img_w_f;
-            let scale_y = available_h / img_h_f;
-            scale_x.min(scale_y).clamp(0.05, 1.0)
-        } else {
-            1.0
-        }
+    /// Compute the target window dimensions to preserve image aspect ratio within 75% of screen size.
+    #[allow(dead_code)]
+    pub fn calculate_target_window_size(
+        img_dims: (u32, u32),
+        screen_dims: (f64, f64),
+    ) -> (f64, f64) {
+        calculate_target_window_size(img_dims, screen_dims)
     }
 
     /// Set a newly loaded image and initialize viewport zoom and pan.
@@ -133,11 +133,7 @@ impl CanvasState {
         if let Some(ref img) = self.image {
             let (w, h) = img.metadata.dimensions;
             if w > 0 && h > 0 {
-                let available_w = (window_size.0 * 0.95).max(100.0) as f32;
-                let available_h = (window_size.1 * 0.95).max(100.0) as f32;
-                let scale_x = available_w / w as f32;
-                let scale_y = available_h / h as f32;
-                self.zoom = scale_x.min(scale_y).clamp(0.02, 50.0);
+                self.zoom = Self::calculate_initial_zoom(w, h, window_size.0, window_size.1);
                 self.pan_offset = (0.0, 0.0);
             }
         }
@@ -191,11 +187,56 @@ impl CanvasState {
         self.zoom = (self.zoom * delta_factor).clamp(0.02, 50.0);
     }
 
+    /// Apply incremental zoom factor centered at a specific cursor coordinate relative to the viewport size.
+    pub fn zoom_at(&mut self, factor: f32, cursor: (f32, f32), viewport: (f32, f32)) {
+        if viewport.0 <= 0.0 || viewport.1 <= 0.0 {
+            self.apply_zoom_delta(factor);
+            return;
+        }
+
+        let old_zoom = self.zoom;
+        let new_zoom = (old_zoom * factor).clamp(0.02, 50.0);
+        if (new_zoom - old_zoom).abs() < f32::EPSILON {
+            return;
+        }
+
+        let k = new_zoom / old_zoom;
+        let dx = cursor.0 - viewport.0 / 2.0;
+        let dy = cursor.1 - viewport.1 / 2.0;
+
+        self.pan_offset.0 = dx - k * (dx - self.pan_offset.0);
+        self.pan_offset.1 = dy - k * (dy - self.pan_offset.1);
+        self.zoom = new_zoom;
+    }
+
     /// Pan by delta (dx, dy).
     pub fn pan(&mut self, dx: f32, dy: f32) {
         self.pan_offset.0 += dx;
         self.pan_offset.1 += dy;
     }
+}
+
+/// Compute the target window dimensions to preserve image aspect ratio within 75% of screen size.
+pub fn calculate_target_window_size(
+    img_dims: (u32, u32),
+    screen_dims: (f64, f64),
+) -> (f64, f64) {
+    let (w, h) = (img_dims.0 as f64, img_dims.1 as f64);
+    if w <= 0.0 || h <= 0.0 {
+        return (800.0, 600.0);
+    }
+
+    let max_w = (screen_dims.0 * 0.75).max(400.0);
+    let max_h = (screen_dims.1 * 0.75).max(300.0);
+
+    let (target_w, target_h) = if w <= max_w && h <= max_h {
+        (w, h)
+    } else {
+        let scale = (max_w / w).min(max_h / h);
+        (w * scale, h * scale)
+    };
+
+    (target_w.max(400.0), target_h.max(300.0))
 }
 
 use crate::manager::ExtensionManager;
@@ -207,7 +248,21 @@ pub fn canvas_view(
     window_size: (f64, f64),
     ext_mgr: Option<&Arc<Mutex<ExtensionManager>>>,
 ) -> Element {
+    let mut canvas_size = use_state(|| (window_size.0 as f32, window_size.1 as f32));
     let current_state = state.read().clone();
+
+    let (acrylic_enabled, show_watermark) = if let Some(mgr_arc) = ext_mgr {
+        if let Ok(manager) = mgr_arc.lock() {
+            (
+                manager.settings.acrylic_background,
+                manager.settings.show_watermark,
+            )
+        } else {
+            (false, true)
+        }
+    } else {
+        (false, true)
+    };
 
     if let Some(ref image_data) = current_state.image {
         let (img_w, img_h) = image_data.metadata.dimensions;
@@ -259,12 +314,35 @@ pub fn canvas_view(
                 .overflow(Overflow::Clip)
                 .main_align(Alignment::Center)
                 .cross_align(Alignment::Center)
+                .background(Theme::canvas_background(acrylic_enabled))
+                .on_sized(move |e: Event<SizedEventData>| {
+                    let w = e.area.size.width;
+                    let h = e.area.size.height;
+                    if w > 0.0 && h > 0.0 {
+                        canvas_size.set((w, h));
+                    }
+                })
                 .on_wheel(move |e: Event<WheelEventData>| {
                     let delta = e.delta_y;
-                    let factor = if delta < 0.0 { 1.15 } else { 1.0 / 1.15 };
+                    if delta == 0.0 {
+                        return;
+                    }
+                    let factor = if delta > 0.0 { 1.15 } else { 1.0 / 1.15 };
+                    let cursor = (e.element_location.x as f32, e.element_location.y as f32);
+                    let (canvas_w, canvas_h) = *canvas_size.read();
+                    let viewport = if canvas_w > 0.0 && canvas_h > 0.0 {
+                        (canvas_w, canvas_h)
+                    } else {
+                        (window_size.0 as f32, window_size.1 as f32)
+                    };
                     state.with_mut(|mut st| {
-                        st.apply_zoom_delta(factor);
-                        crate::log_input!("Mouse wheel scroll: delta={delta:.1} -> Zoom: {:.0}%", st.zoom * 100.0);
+                        st.zoom_at(factor, cursor, viewport);
+                        crate::log_input!(
+                            "Mouse wheel scroll: delta={delta:.1} cursor=({:.0}, {:.0}) -> Zoom: {:.0}%",
+                            cursor.0,
+                            cursor.1,
+                            st.zoom * 100.0
+                        );
                     });
                 })
                 .on_mouse_down(move |e: Event<MouseEventData>| {
@@ -287,11 +365,20 @@ pub fn canvas_view(
                 .on_mouse_up(move |_| {
                     state.with_mut(|mut st| st.is_dragging = false);
                 })
+                .on_global_pointer_press(move |_| {
+                    state.with_mut(|mut st| st.is_dragging = false);
+                })
+                .on_capture_global_pointer_press(move |_| {
+                    state.with_mut(|mut st| st.is_dragging = false);
+                })
                 .on_file_drop(move |e: Event<FileEventData>| {
                     if let Some(ref path) = e.file_path {
                         crate::log_input!("File dropped onto window canvas: '{}'", path.display());
                         match load_image(path) {
-                            Ok(img) => state.with_mut(|mut st| st.set_image(img, window_size)),
+                            Ok(img) => {
+                                crate::window::resize_window_to_image_aspect(img.metadata.dimensions);
+                                state.with_mut(|mut st| st.set_image(img, window_size));
+                            }
                             Err(err) => state.with_mut(|mut st| st.set_error_for_path(err, path.clone())),
                         }
                     }
@@ -316,7 +403,10 @@ pub fn canvas_view(
                     if let Some(ref path) = e.file_path {
                         crate::log_input!("File dropped onto window canvas: '{}'", path.display());
                         match load_image(path) {
-                            Ok(img) => state.with_mut(|mut st| st.set_image(img, window_size)),
+                            Ok(img) => {
+                                crate::window::resize_window_to_image_aspect(img.metadata.dimensions);
+                                state.with_mut(|mut st| st.set_image(img, window_size));
+                            }
                             Err(err) => state.with_mut(|mut st| st.set_error_for_path(err, path.clone())),
                         }
                     }
@@ -362,7 +452,10 @@ pub fn canvas_view(
                 if let Some(ref path) = e.file_path {
                     crate::log_input!("File dropped onto window canvas: '{}'", path.display());
                     match load_image(path) {
-                        Ok(img) => state.with_mut(|mut st| st.set_image(img, window_size)),
+                        Ok(img) => {
+                            crate::window::resize_window_to_image_aspect(img.metadata.dimensions);
+                            state.with_mut(|mut st| st.set_image(img, window_size));
+                        }
                         Err(err) => state.with_mut(|mut st| st.set_error_for_path(err, path.clone())),
                     }
                 }
@@ -410,15 +503,25 @@ pub fn canvas_view(
             rect().into()
         };
 
+        let watermark_child: Element = if show_watermark {
+            logo_element
+        } else {
+            rect().into()
+        };
+
         rect()
             .width(Size::fill())
             .height(Size::fill())
             .main_align(Alignment::Center)
             .cross_align(Alignment::Center)
+            .background(Theme::canvas_background(acrylic_enabled))
             .on_file_drop(move |e: Event<FileEventData>| {
                 if let Some(ref path) = e.file_path {
                     match load_image(path) {
-                        Ok(img) => state.with_mut(|mut st| st.set_image(img, window_size)),
+                        Ok(img) => {
+                            crate::window::resize_window_to_image_aspect(img.metadata.dimensions);
+                            state.with_mut(|mut st| st.set_image(img, window_size));
+                        }
                         Err(err) => state.with_mut(|mut st| st.set_error_for_path(err, path.clone())),
                     }
                 }
@@ -428,7 +531,7 @@ pub fn canvas_view(
                     .direction(Direction::vertical())
                     .cross_align(Alignment::Center)
                     .spacing(14.0)
-                    .child(logo_element)
+                    .child(watermark_child)
                     .child(
                         rect()
                             .direction(Direction::vertical())
@@ -460,14 +563,13 @@ mod tests {
     #[test]
     fn test_initial_zoom_small_image() {
         let zoom = CanvasState::calculate_initial_zoom(400, 300, 800.0, 600.0);
-        assert_eq!(zoom, 1.0);
+        assert_eq!(zoom, 2.0);
     }
 
     #[test]
     fn test_initial_zoom_large_image() {
         let zoom = CanvasState::calculate_initial_zoom(3840, 2160, 800.0, 600.0);
-        assert!(zoom < 1.0);
-        assert!(zoom > 0.0);
+        assert!((zoom - 800.0 / 3840.0).abs() < 0.001);
     }
 
     #[test]
@@ -571,5 +673,71 @@ mod tests {
         // When explicitly clearing, path is cleared
         state.clear_image();
         assert_eq!(state.active_path(), None);
+    }
+
+    #[test]
+    fn test_cursor_centered_zoom() {
+        let mut state = CanvasState::new();
+        state.zoom = 1.0;
+        state.pan_offset = (0.0, 0.0);
+
+        // Zooming at viewport center (400, 300) on 800x600 viewport keeps pan_offset at (0, 0)
+        state.zoom_at(2.0, (400.0, 300.0), (800.0, 600.0));
+        assert_eq!(state.zoom, 2.0);
+        assert_eq!(state.pan_offset, (0.0, 0.0));
+
+        // Reset
+        state.zoom = 1.0;
+        state.pan_offset = (0.0, 0.0);
+
+        // Zooming at cursor offset (600, 300) [dx = +200] with 2x zoom:
+        // P_x1 = 200 - 2.0 * (200 - 0) = -200
+        state.zoom_at(2.0, (600.0, 300.0), (800.0, 600.0));
+        assert_eq!(state.zoom, 2.0);
+        assert!((state.pan_offset.0 - (-200.0)).abs() < 0.001);
+        assert!((state.pan_offset.1 - 0.0).abs() < 0.001);
+
+        // Zooming out with 0.5x at same cursor position (600, 300) returns pan_offset to 0
+        state.zoom_at(0.5, (600.0, 300.0), (800.0, 600.0));
+        assert_eq!(state.zoom, 1.0);
+        assert!((state.pan_offset.0 - 0.0).abs() < 0.001);
+        assert!((state.pan_offset.1 - 0.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_pan_delta() {
+        let mut state = CanvasState::new();
+        state.pan(15.0, -25.0);
+        assert_eq!(state.pan_offset, (15.0, -25.0));
+        state.pan(-10.0, 5.0);
+        assert_eq!(state.pan_offset, (5.0, -20.0));
+    }
+
+    #[test]
+    fn test_calculate_target_window_size() {
+        let screen = (1920.0, 1080.0); // 75% bounds = (1440.0, 810.0)
+
+        // 1. Small image within 75% bounds (800x600) stays 800x600
+        let (w, h) = calculate_target_window_size((800, 600), screen);
+        assert_eq!((w, h), (800.0, 600.0));
+
+        // 2. Large landscape 4K image (3840x2160) scales to 1440x810 preserving 16:9 aspect ratio
+        let (w, h) = calculate_target_window_size((3840, 2160), screen);
+        assert!((w - 1440.0).abs() < 0.001);
+        assert!((h - 810.0).abs() < 0.001);
+        assert!((w / h - 16.0 / 9.0).abs() < 0.001);
+
+        // 3. Tall portrait image (1000x3000) scales to fit max_h (810) -> (270, 810), clamped to min_w 400 -> (400, 810)
+        let (w, h) = calculate_target_window_size((1000, 3000), screen);
+        assert!((w - 400.0).abs() < 0.001);
+        assert!((h - 810.0).abs() < 0.001);
+
+        // 4. Tiny image (50x50) clamps to minimum bounds (400x300)
+        let (w, h) = calculate_target_window_size((50, 50), screen);
+        assert_eq!((w, h), (400.0, 300.0));
+
+        // 5. Zero/empty dimensions fallback to default 800x600
+        let (w, h) = calculate_target_window_size((0, 0), screen);
+        assert_eq!((w, h), (800.0, 600.0));
     }
 }

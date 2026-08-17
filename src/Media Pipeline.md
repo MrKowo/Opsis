@@ -52,7 +52,7 @@ To optimize decoder discovery, the pipeline utilizes an $O(1)$ fast-path resolut
 ## 3. Data Contracts & FFI Interfaces
 
 > [!NOTE]
-> All shared C-ABI types (`FfiSlice`, `FfiErrorCode`, `FfiStreamVTable`, `FfiDecoderPlugin`) are canonically defined in the [`opsis_ffi_core`](Extensions%20Pipeline.md#31-canonical-c-abi-core-crate-opsis-ffi-core) shared crate (`opsis_ffi_core.h`).
+> All shared C-ABI types (`FfiSlice`, `FfiErrorCode`, `FfiStreamVTable`, `FfiDecoderPlugin`) are canonically defined in the [`ffi`](Extensions%20Pipeline.md#31-canonical-c-abi-core-crate-ffi--cratesffi) shared crate (`crates/ffi` / `opsis_ffi_core.h`).
 
 To support dynamic hot-loading of `.opx` extension packages across language boundaries, the pipeline enforces a strict C-ABI interface.
 

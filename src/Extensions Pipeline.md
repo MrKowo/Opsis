@@ -72,9 +72,9 @@ Opsis extensions are packaged as modular `.opx` archives containing native libra
 
 ## 3. Unified Plugin Lifecycle & FFI Interfaces
 
-### 3.1 Canonical C-ABI Core Crate (`opsis-ffi-core`)
+### 3.1 Canonical C-ABI Core Crate (`ffi` / `crates/ffi`)
 
-All shared C-ABI structures, error codes, and VTables are canonically defined in the shared `opsis-ffi-core` Rust crate and exported as `opsis_ffi_core.h` for C/C++ developers to prevent field misalignment or struct layout drift:
+All shared C-ABI structures, error codes, and VTables are canonically defined in the shared `ffi` (`crates/ffi`) Rust crate and exported as `opsis_ffi_core.h` for C/C++ developers to prevent field misalignment or struct layout drift:
 
 ```rust
 use std::ffi::c_void;

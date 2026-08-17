@@ -70,7 +70,7 @@ It is built directly on **Vulkan** (via `ash` in Rust) utilizing **offline preco
 ## 3. Polymorphic Scene Graph & Render Node Model
 
 > [!NOTE]
-> All shared C-ABI types (`FfiSlice`, `FfiPipelineDescriptor`) are canonically defined in the [`opsis_ffi_core`](Extensions%20Pipeline.md#31-canonical-c-abi-core-crate-opsis-ffi-core) shared crate (`opsis_ffi_core.h`).
+> All shared C-ABI types (`FfiSlice`, `FfiPipelineDescriptor`) are canonically defined in the [`ffi`](Extensions%20Pipeline.md#31-canonical-c-abi-core-crate-ffi--cratesffi) shared crate (`crates/ffi` / `opsis_ffi_core.h`).
 
 The rendering engine represents visual entities inside the viewport through a polymorphic `RenderNode`:
 

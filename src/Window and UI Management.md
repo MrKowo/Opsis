@@ -104,7 +104,7 @@ By default, **Opsis presents a pure, uncluttered viewport canvas**. Regions can 
 ## 4. Blender-Style Operator Lifecycle & Architecture
 
 > [!NOTE]
-> All shared C-ABI types (`FfiSlice`, `FfiOperatorDescriptor`, `FfiOperatorContext`, `FfiPanelDescriptor`) are canonically defined in the [`opsis_ffi_core`](Extensions%20Pipeline.md#31-canonical-c-abi-core-crate-opsis-ffi-core) shared crate (`opsis_ffi_core.h`).
+> All shared C-ABI types (`FfiSlice`, `FfiOperatorDescriptor`, `FfiOperatorContext`, `FfiPanelDescriptor`) are canonically defined in the [`ffi`](Extensions%20Pipeline.md#31-canonical-c-abi-core-crate-ffi--cratesffi) shared crate (`crates/ffi` / `opsis_ffi_core.h`).
 
 All interactive tools, commands, and shortcuts in Opsis implement the **Operator Contract**:
 

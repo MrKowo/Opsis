@@ -1,31 +1,31 @@
 # Architecture & Technology Stack Specification
 
-This document provides the definitive **Cargo Workspace Topology, Crate Breakdown, and Technology Stack Matrix** for Opsis. It serves as the engineering blueprint for implementing the engine without ambiguity.
+This document provides the definitive **Cargo Workspace Topology, Crate Breakdown, and Technology Stack Matrix** for Opsis. It serves as the engineering blueprint for implementing the engine with clean, concise internal crate names.
 
 ---
 
 ## 1. Cargo Workspace Topology
 
-Opsis is architected as a modular Cargo Workspace with strict unidirectional dependency boundaries:
+Opsis is architected as a modular Cargo Workspace with clean, short crate names and strict unidirectional dependency boundaries:
 
 ```mermaid
 graph TD
-    Main["opsis (src/main.rs)<br/>CLI & Bootstrap"] --> UI["opsis_ui<br/>winit + Quad Batcher + Layout"]
-    Main --> Render["opsis_render<br/>ash + gpu-allocator + FP32"]
-    Main --> Media["opsis_media<br/>Stream I/O + LRU Cache + Rayon"]
-    Main --> Ext["opsis_extensions<br/>libloading + pyo3 + Safe Mode"]
+    Main["opsis (src/main.rs)<br/>CLI & Bootstrap"] --> UI["ui (crates/ui)<br/>winit + Quad Batcher + Layout"]
+    Main --> Render["render (crates/render)<br/>ash + gpu-allocator + FP32"]
+    Main --> Media["media (crates/media)<br/>Stream I/O + LRU Cache + Rayon"]
+    Main --> Ext["extensions (crates/extensions)<br/>libloading + pyo3 + Safe Mode"]
     
-    UI --> Core["opsis_core<br/>glam + EventBus + Config"]
-    Render --> Core
-    Media --> Core
-    Ext --> Core
+    UI --> Common["common (crates/common)<br/>glam + EventBus + Config"]
+    Render --> Common
+    Media --> Common
+    Ext --> Common
     
-    Media --> FFI["opsis_ffi_core<br/>Strict C-ABI Structs & VTables"]
+    Media --> FFI["ffi (crates/ffi)<br/>Strict C-ABI Structs & VTables"]
     Render --> FFI
     UI --> FFI
     Ext --> FFI
     
-    Bundled["opsis_builtin_decoders<br/>(Bundled PNG/JPEG/WebP/BMP Extension)"] -.->|Implements C-ABI| FFI
+    Bundled["builtin_decoders (crates/builtin_decoders)<br/>(Bundled PNG/JPEG/WebP/BMP Extension)"] -.->|Implements C-ABI| FFI
 ```
 
 ### 1.1 Directory Structure
@@ -34,16 +34,17 @@ graph TD
 Opsis/
 ├── Cargo.toml                     # Root workspace manifest
 ├── Cargo.lock
-├── crates/
-│   ├── opsis_ffi_core/            # Strict C-ABI structs, FfiSlice, VTables, opsis_plugin_init
-│   ├── opsis_core/                # Shared math (glam), EventBus, config, error types
-│   ├── opsis_media/               # Fast-path sniffer, async decoders, LRU cache (moka)
-│   ├── opsis_render/              # Vulkan backend (ash, gpu-allocator), swapchain, FP32 canvas
-│   ├── opsis_ui/                  # Windowing (winit), declarative UILayout, modal operators
-│   ├── opsis_extensions/          # Dynamic loader (libloading), pyo3 runner, Safe Mode
-│   ├── opsis_builtin_decoders/    # Bundled basic decoder plugin (PNG, JPEG, WebP, BMP, ICO)
-│   └── opsis_plugin_sdk/          # High-level ergonomic Rust SDK for writing .opx plugins
 ├── src/                           # Main binary entry point (opsis executable, CLI args)
+│   └── main.rs
+├── crates/
+│   ├── ffi/                       # (Crate: ffi) Strict C-ABI structs, FfiSlice, VTables, opsis_plugin_init
+│   ├── common/                    # (Crate: common) Shared math (glam), EventBus, config, error types
+│   ├── render/                    # (Crate: render) Vulkan backend (ash, gpu-allocator), swapchain, FP32 canvas
+│   ├── ui/                        # (Crate: ui) Windowing (winit), declarative UILayout, modal operators
+│   ├── media/                     # (Crate: media) Fast-path sniffer, async decoders, LRU cache (moka)
+│   ├── extensions/                # (Crate: extensions) Dynamic loader (libloading), pyo3 runner, Safe Mode
+│   ├── builtin_decoders/          # (Crate: builtin_decoders) Bundled basic decoder plugin (PNG, JPEG, WebP, BMP)
+│   └── sdk/                       # (Crate: opsis_sdk) Public plugin authoring crate for third-party extensions
 ├── shaders/                       # Source GLSL shaders & precompiled SPIR-V binaries
 │   ├── compile_shaders.py
 │   ├── canvas_fp32.frag
@@ -55,13 +56,15 @@ Opsis/
 
 ## 2. Crate Breakdown & Responsibilities
 
-### 2.1 `opsis_ffi_core` (Canonical C-ABI Layer)
+### 2.1 `ffi` (`crates/ffi`) — Canonical C-ABI Layer
+* **Package Name:** `ffi` (or `opsis-ffi` for external distribution)
 * **Purpose:** Pure, dependency-free C-compatible data structures, VTables, error codes, and slices.
 * **Dependencies:** `None` (pure `std`).
-* **Tooling:** Uses `cbindgen = "0.27"` to generate the canonical C/C++ header `opsis_ffi_core.h`.
+* **Tooling:** Uses `cbindgen = "0.27"` in `build.rs` to generate the canonical C/C++ header `opsis_ffi_core.h`.
 * **Key Types:** `FfiSlice`, `FfiPluginManifest`, `FfiDecoderPlugin`, `FfiEventBusVTable`, `FfiLayoutContext`, `FfiOperatorDescriptor`, `FfiErrorCode`.
 
-### 2.2 `opsis_core` (Shared Primitives & State)
+### 2.2 `common` (`crates/common`) — Shared Primitives & State
+* **Package Name:** `common`
 * **Purpose:** High-performance SIMD math, shared configuration models, and host-internal pub/sub event bus.
 * **Dependencies:**
   - `glam = { version = "0.29", features = ["bytemuck"] }` (16-byte aligned SIMD math)
@@ -70,52 +73,58 @@ Opsis/
   - `parking_lot = "0.12"` (Low-overhead synchronization primitives)
   - `thiserror = "1.0"` (Deterministic error handling)
 
-### 2.3 `opsis_render` (Vulkan Graphics Engine)
+### 2.3 `render` (`crates/render`) — Vulkan Graphics Engine
+* **Package Name:** `render`
 * **Purpose:** Raw Vulkan 1.3 rendering backend, sub-allocated GPU memory, swapchain management, and linear FP32 canvas.
 * **Dependencies:**
   - `ash = "0.38"` (Direct, zero-overhead Vulkan bindings)
   - `gpu-allocator = { version = "0.27", default-features = false, features = ["vulkan"] }` (Fast sub-allocated VRAM pool)
   - `bytemuck = "1.18"` (Push constants and uniform packing)
-  - `opsis_core`, `opsis_ffi_core`
+  - `common`, `ffi`
 
-### 2.4 `opsis_ui` (Windowing, Declarative Layout & Quad Batcher)
+### 2.4 `ui` (`crates/ui`) — Windowing, Declarative Layout & Quad Batcher
+* **Package Name:** `ui`
 * **Purpose:** Window surface management, Blender-style `UILayout` tree, immediate-mode quad batching, font rasterization, and modal operator lifecycle.
 * **Dependencies:**
   - `winit = "0.30"` (Cross-platform windowing, subpixel DPI, drag-and-drop)
   - `fontdue = "0.9"` (Ultra-fast SIMD font rasterizer, $< 0.1\text{ ms}$ per glyph)
   - `windows-sys = { version = "0.59", features = ["Win32_Graphics_Dwm", "Win32_UI_WindowsAndMessaging"] }` (Windows DWM Mica / Acrylic blur)
-  - `opsis_core`, `opsis_render`, `opsis_ffi_core`
+  - `common`, `render`, `ffi`
 
-### 2.5 `opsis_media` (Media Streaming, Registry & Caching)
+### 2.5 `media` (`crates/media`) — Media Streaming, Registry & Caching
+* **Package Name:** `media`
 * **Purpose:** $O(1)$ fast-path header sniffer, asynchronous decompression worker pool, dynamic metadata store, and LRU cache.
 * **Dependencies:**
   - `rayon = "1.10"` (Work-stealing CPU worker pool for decoders)
   - `crossbeam-channel = "0.5"` (Zero-allocation lock-free worker queues)
   - `moka = { version = "0.12", features = ["sync"] }` (Concurrent, thread-safe LRU byte eviction cache)
-  - `opsis_core`, `opsis_ffi_core`
+  - `common`, `ffi`
 
-### 2.6 `opsis_extensions` (Dynamic Package Host & Scripting)
+### 2.6 `extensions` (`crates/extensions`) — Dynamic Package Host & Scripting
+* **Package Name:** `extensions`
 * **Purpose:** `.opx` package discovery, dynamic library linking under `std::panic::catch_unwind`, Safe Mode isolation, and lazy Python runtime.
 * **Dependencies:**
   - `libloading = "0.8"` (Dynamic library `.dll`/`.so`/`.dylib` loader)
   - `zip = { version = "2.2", default-features = false, features = ["deflate"] }` (`.opx` archive extractor)
   - `pyo3 = { version = "0.22", optional = true }` (Lazy-loaded embedded Python 3 runtime)
   - `sha2 = "0.10"` (Cryptographic checksum verification for native binaries)
-  - `opsis_core`, `opsis_ffi_core`
+  - `common`, `ffi`
 
-### 2.7 `opsis_builtin_decoders` (Bundled Basic Decoders Extension)
+### 2.7 `builtin_decoders` (`crates/builtin_decoders`) — Bundled Basic Decoders Extension
+* **Package Name:** `builtin_decoders`
 * **Purpose:** Bundled extension providing the baseline decoders (PNG, JPEG, WebP, BMP, ICO) across the canonical `FfiDecoderPlugin` C-ABI.
 * **Dependencies:**
   - `zune-jpeg = "0.4"` (Fastest SIMD-accelerated JPEG decoder)
   - `image = { version = "0.25", default-features = false, features = ["png", "webp", "bmp", "ico"] }`
-  - `opsis_ffi_core`
+  - `ffi`
 
-### 2.8 `opsis` (Root Executable Binary — `src/main.rs`)
+### 2.8 `opsis` (`src/main.rs`) — Root Executable Binary
+* **Package Name:** `opsis`
 * **Purpose:** CLI argument parsing (`--safe-mode`, `--no-plugins`, file paths), system bootstrap, and event loop orchestration.
 * **Dependencies:**
   - `clap = { version = "4.5", features = ["derive"] }` (CLI flag parser)
   - `tracing = "0.1"` & `tracing-subscriber = "0.3"` (High-performance diagnostic logging)
-  - `opsis_core`, `opsis_render`, `opsis_ui`, `opsis_media`, `opsis_extensions`
+  - `common`, `render`, `ui`, `media`, `extensions`
 
 ---
 
@@ -138,7 +147,22 @@ Opsis/
 
 ---
 
-## 4. Concurrency & Execution Model
+## 4. Code Import Ergonomics
+
+With clean, short crate names, internal host engine imports remain readable and concise:
+
+```rust
+// In src/main.rs or subsystem modules:
+use common::{EventBus, OpsisConfig};
+use ffi::{FfiDecoderPlugin, FfiSlice};
+use media::DecoderRegistry;
+use render::VulkanCanvas;
+use ui::{ModalReturn, UILayout};
+```
+
+---
+
+## 5. Concurrency & Execution Model
 
 * **Dedicated Thread Separation:**
   - **Main Thread (UI & Event Loop):** Drives `winit` event pumping, declarative `UILayout` generation, operator modal loops, and Vulkan frame presentation.

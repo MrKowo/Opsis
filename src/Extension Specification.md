@@ -239,7 +239,7 @@ def handle_viewport_transform(event):
 Native components deliver maximum performance for format decoders, heavy multi-threading, and hardware SIMD.
 
 > [!NOTE]
-> All canonical C-ABI struct and VTable definitions (`FfiSlice`, `FfiPluginManifest`, `FfiDecoderPlugin`, `opsis_plugin_init`) are defined in the canonical shared header `opsis_ffi_core.h` and Rust crate `opsis-ffi-core`.
+> All canonical C-ABI struct and VTable definitions (`FfiSlice`, `FfiPluginManifest`, `FfiDecoderPlugin`, `opsis_plugin_init`) are defined in the canonical shared header `opsis_ffi_core.h` and Rust crate `ffi` (`crates/ffi`).
 
 ### 4.1 Canonical Entry Point (`opsis_plugin_init`)
 
